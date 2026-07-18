@@ -1,0 +1,48 @@
+# Secrets and operator-local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.kdbx
+*credentials*.json
+*secrets*.json
+config/*.profile.json
+
+# Local audit evidence and runtime state
+/reports/
+/test[0-9]*/
+/testacad*/
+/testv*/
+testResults.xml
+*.log
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+
+# Local reference checkout used to port selected DNS logic; not part of Claudit.
+/cti-workbench/
+
+# Tooling, editor and OS state
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Interrupted atomic writes and language caches
+*.tmp
+*.bak
+*.swp
+*.pyc
+__pycache__/

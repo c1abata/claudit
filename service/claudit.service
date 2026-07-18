@@ -1,0 +1,44 @@
+[Unit]
+Description=Claudit multi-cloud audit orchestrator
+Documentation=file:/opt/claudit/docs/OPERATIONS.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=claudit
+Group=claudit
+WorkingDirectory=/opt/claudit
+ExecStartPre=/usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File /opt/claudit/service/Start-ClauditService.ps1 -ConfigPath /etc/claudit/service.json -ValidateOnly
+ExecStart=/usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File /opt/claudit/service/Start-ClauditService.ps1 -ConfigPath /etc/claudit/service.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+KillMode=mixed
+UMask=0027
+
+Environment=HOME=/var/lib/claudit
+Environment=XDG_CONFIG_HOME=/var/lib/claudit/.config
+Environment=AZURE_CONFIG_DIR=/var/lib/claudit/.azure
+Environment=AWS_CONFIG_FILE=/var/lib/claudit/.aws/config
+Environment=AWS_SHARED_CREDENTIALS_FILE=/var/lib/claudit/.aws/credentials
+Environment=CLOUDSDK_CONFIG=/var/lib/claudit/.config/gcloud
+EnvironmentFile=-/etc/claudit/claudit.env
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/claudit
+
+[Install]
+WantedBy=multi-user.target

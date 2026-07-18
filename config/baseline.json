@@ -1,0 +1,99 @@
+{
+    "_comment": "Claudit secure baseline. Values reflect CIS Microsoft 365 Foundations and Microsoft Secure Score guidance. Tune to your tenant's policy before relying on results.",
+    "Entra": {
+        "RequireSecurityDefaultsOrConditionalAccess": true,
+        "RequireMfaForAdmins": true,
+        "BlockLegacyAuthentication": true,
+        "MaxGlobalAdministrators": 4,
+        "AllowUsersToRegisterApplications": false,
+        "AllowedInviteFrom": ["none", "adminsAndGuestInviters"],
+        "AllowUsersToConsentForApps": false
+    },
+    "Exchange": {
+        "RequireModernAuthentication": true,
+        "BlockSmtpClientAuthentication": true,
+        "DisablePop3": true,
+        "DisableImap4": true,
+        "BlockExternalAutoForwarding": true,
+        "RequireDkimOnAllDomains": true,
+        "RequireOrganizationAuditEnabled": true
+    },
+    "SharePoint": {
+        "MaxSharingCapability": "externalUserSharingOnly",
+        "BlockLegacyAuthProtocols": true,
+        "RequireReauthAcceptingUserMatchesInvited": true
+    },
+    "OneDrive": {
+        "RestrictUnmanagedDeviceSync": true,
+        "RequireBlockedSyncFileExtensions": true,
+        "MinDeletedUserRetentionDays": 90
+    },
+    "Azure": {
+        "_comment": "Read-only az CLI checks. Subscription/Tenant can be passed by wizard or CLI. Principal allow lists use object IDs, never names.",
+        "HighRiskAzureRoles": ["Owner", "Contributor", "User Access Administrator"],
+        "AllowedPrivilegedPrincipalIds": [],
+        "HighRiskGraphAppRoles": [
+            "Application.ReadWrite.All",
+            "AppRoleAssignment.ReadWrite.All",
+            "Directory.ReadWrite.All",
+            "Domain.ReadWrite.All",
+            "Group.ReadWrite.All",
+            "RoleManagement.ReadWrite.Directory",
+            "User.ReadWrite.All"
+        ],
+        "RequireStorageDefaultDeny": false,
+        "RequireKeyVaultPurgeProtection": true
+    },
+    "AWS": {
+        "_comment": "Read-only aws CLI checks. Regions scopes regional controls; keep small for tests or set to all active regions for enterprise runs.",
+        "Regions": ["us-east-1"],
+        "MinPasswordLength": 14,
+        "MaxPasswordAgeDays": 90,
+        "PasswordReusePrevention": 24,
+        "MaxAccessKeyAgeDays": 90,
+        "RequireVpcFlowLogs": true
+    },
+    "GCP": {
+        "_comment": "Read-only gcloud checks. Project/account/organization can be passed by wizard or CLI; Organization is optional.",
+        "Organization": "",
+        "AllowedPrimitiveRoleMembers": [],
+        "MaxServiceAccountKeyAgeDays": 90,
+        "RequiredAuditLogTypes": ["DATA_READ", "DATA_WRITE"],
+        "RequireOsLogin": true,
+        "RequireCentralLogSink": true
+    },
+    "Tailscale": {
+        "_comment": "Read-only Tailscale API checks. Pass Tailnet with wizard/CLI or set TAILSCALE_TAILNET. API token is read from ApiTokenEnv, default TAILSCALE_API_TOKEN.",
+        "Tailnet": "",
+        "MaxStaleDeviceDays": 45,
+        "MaxAuthKeyExpiryDays": 30,
+        "DisallowReusableAuthKeys": true,
+        "DisallowPreauthorizedAuthKeys": true,
+        "DisallowAllowAllAcl": true
+    },
+    "Domain": {
+        "_comment": "Formal and passive DNS checks for pre-authorized domains only. dnsx is optional and disabled by default.",
+        "AuthorizedDomains": [],
+        "Subdomains": ["www", "autodiscover", "mail", "vpn", "portal", "admin", "dev", "staging"],
+        "RequireDnssec": false,
+        "DkimSelectors": ["default", "google", "selector1", "selector2", "k1", "s1", "s2", "mail"],
+        "EnableDnsx": false,
+        "DnsxBinary": "dnsx",
+        "DnsxRateLimit": 100,
+        "DnsxResolvers": [],
+        "DnsxTimeoutSeconds": 300
+    },
+    "VPS": {
+        "_comment": "Read-only Linux VPS posture checks. Target/user/port can be passed by wizard or CLI. AllowedPublicPorts keeps exposed service review explicit.",
+        "AllowedPublicPorts": [80, 443],
+        "MaxPendingUpdates": 20,
+        "RequireFirewall": true,
+        "RequireAuthLog": true,
+        "RequireSshPasswordAuthenticationDisabled": true,
+        "RequireSshRootLoginDisabled": true
+    },
+    "Inventory": {
+        "_comment": "Normalized asset inventory cap per provider for report evidence size.",
+        "MaxAssetsPerProvider": 500
+    }
+}
