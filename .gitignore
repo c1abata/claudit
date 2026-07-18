@@ -11,6 +11,7 @@
 *credentials*.json
 *secrets*.json
 config/*.profile.json
+.agents/
 
 # Local audit evidence and runtime state
 /reports/
