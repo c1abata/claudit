@@ -68,7 +68,11 @@ if (Test-CaHelpRequested -Help:$Help -RemainingArguments $RemainingArguments -In
 }
 Assert-CaNoRemainingArgument -RemainingArguments $RemainingArguments
 $result = [ordered]@{
+    SchemaVersion = '1.0'
+    ReportType    = 'ClauditPreflight'
     Status        = 'Pass'
+    Outcome       = 'Ready'
+    Ready         = $true
     Root          = $root
     PowerShell    = $PSVersionTable.PSVersion.ToString()
     Services      = $Service
@@ -76,6 +80,8 @@ $result = [ordered]@{
     Checks        = [System.Collections.Generic.List[object]]::new()
     Warnings      = [System.Collections.Generic.List[string]]::new()
     Errors        = [System.Collections.Generic.List[string]]::new()
+    BlockingErrors = [System.Collections.Generic.List[object]]::new()
+    Summary       = $null
     Environment   = [ordered]@{}
 }
 
@@ -83,12 +89,28 @@ function Add-PreflightCheck {
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][ValidateSet('Pass', 'Warning', 'Fail')][string]$Status,
-        [string]$Detail = ''
+        [string]$Detail = '',
+        [ValidateSet('Runtime', 'Configuration', 'Dependency', 'Authentication', 'Scope', 'Output', 'Advisory', 'Internal')]
+        [string]$Category = 'Runtime',
+        [string]$Recommendation = ''
     )
-    $result.Checks.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
+    if ([string]::IsNullOrWhiteSpace($Recommendation) -and $Status -eq 'Fail') {
+        $Recommendation = 'Correct this prerequisite and rerun preflight before starting the audit.'
+    }
+    $check = [pscustomobject]@{
+        Name = $Name
+        Status = $Status
+        Category = if ($Status -eq 'Warning' -and $Category -eq 'Runtime') { 'Advisory' } else { $Category }
+        BlocksExecution = ($Status -eq 'Fail')
+        Detail = $Detail
+        Recommendation = $Recommendation
+        DiagnosticId = if ($Status -eq 'Fail') { 'CA-PRE-' + [guid]::NewGuid().ToString('N').Substring(0, 8) } else { '' }
+    }
+    $result.Checks.Add($check)
     if ($Status -eq 'Warning') { $result.Warnings.Add("${Name}: $Detail") }
     if ($Status -eq 'Fail') {
         $result.Errors.Add("${Name}: $Detail")
+        $result.BlockingErrors.Add($check)
         $result.Status = 'Fail'
     }
 }
@@ -418,9 +440,22 @@ try {
     }
 }
 catch {
-    Add-PreflightCheck -Name 'Unhandled preflight exception' -Status Fail -Detail $_.Exception.Message
+    Add-PreflightCheck -Name 'Unhandled preflight exception' -Status Fail -Category Internal -Detail $_.Exception.Message `
+        -Recommendation 'Use the diagnostic ID with the local error record to correct the Claudit runtime failure.'
 }
 
+$failCount = @($result.Checks | Where-Object Status -eq 'Fail').Count
+$warningCount = @($result.Checks | Where-Object Status -eq 'Warning').Count
+$passCount = @($result.Checks | Where-Object Status -eq 'Pass').Count
+$result.Ready = ($failCount -eq 0)
+$result.Outcome = if ($failCount -gt 0) { 'Blocked' } elseif ($warningCount -gt 0) { 'ReadyWithWarnings' } else { 'Ready' }
+$result.Summary = [pscustomobject]@{
+    Total = $result.Checks.Count
+    Pass = $passCount
+    Warning = $warningCount
+    Fail = $failCount
+    Blocking = $failCount
+}
 $output = [pscustomobject]$result
 
 if ($JsonOutputPath) {

@@ -2,7 +2,8 @@
     Dashboard.ps1 - local web cockpit.
 
     The dashboard is intentionally self-contained: PowerShell TCP listener,
-    HTML/CSS/vanilla JS, no external runtime and no tenant secrets persisted.
+    packaged HTML/CSS/vanilla JS assets, no external runtime and no tenant
+    secrets persisted.
     It starts only known Claudit scripts and confines report access to ReportRoot.
 #>
 
@@ -68,6 +69,8 @@ function Get-CaDashboardContentType {
         '.md'   { 'text/markdown; charset=utf-8' }
         '.csv'  { 'text/csv; charset=utf-8' }
         '.log'  { 'text/plain; charset=utf-8' }
+        '.css'  { 'text/css; charset=utf-8' }
+        '.js'   { 'text/javascript; charset=utf-8' }
         '.png'  { 'image/png' }
         '.svg'  { 'image/svg+xml' }
         '.ico'  { 'image/x-icon' }
@@ -349,16 +352,25 @@ function Get-CaDashboardReportSummary {
     try {
         $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($json.PSObject.Properties.Name -contains 'Summary') {
+            $summary = $json.Summary
+            $legacyError = [int](Get-CaDashboardProperty -Object $summary -Name Error -Default 0)
+            $legacyFail = [int](Get-CaDashboardProperty -Object $summary -Name Fail -Default 0)
+            $legacyWarning = [int](Get-CaDashboardProperty -Object $summary -Name Warning -Default 0)
+            $legacyOutcome = if ($legacyError -gt 0) { 'ExecutionError' } elseif ($legacyFail -gt 0) { 'IssuesFound' } elseif ($legacyWarning -gt 0) { 'Attention' } else { 'Pass' }
             return [pscustomobject]@{
                 Kind         = 'audit'
-                Total        = [int]$json.Summary.Total
-                Pass         = [int]$json.Summary.Pass
-                Fail         = [int]$json.Summary.Fail
-                Warning      = [int]$json.Summary.Warning
-                Error        = [int]$json.Summary.Error
-                Critical     = [int]$json.Summary.Critical
-                High         = [int]$json.Summary.High
-                GeneratedUtc = [string]$json.Summary.GeneratedUtc
+                Outcome      = [string](Get-CaDashboardProperty -Object $summary -Name Outcome -Default $legacyOutcome)
+                Total        = [int](Get-CaDashboardProperty -Object $summary -Name Total -Default 0)
+                Pass         = [int](Get-CaDashboardProperty -Object $summary -Name Pass -Default 0)
+                Fail         = [int](Get-CaDashboardProperty -Object $summary -Name Fail -Default 0)
+                Warning      = [int](Get-CaDashboardProperty -Object $summary -Name Warning -Default 0)
+                Error        = [int](Get-CaDashboardProperty -Object $summary -Name Error -Default 0)
+                Problems     = [int](Get-CaDashboardProperty -Object $summary -Name ProblemsDetected -Default ($legacyFail + $legacyWarning))
+                NotEvaluated = [int](Get-CaDashboardProperty -Object $summary -Name NotEvaluated -Default $legacyError)
+                Coverage     = [double](Get-CaDashboardProperty -Object $summary -Name CoveragePercent -Default 100)
+                Critical     = [int](Get-CaDashboardProperty -Object $summary -Name Critical -Default 0)
+                High         = [int](Get-CaDashboardProperty -Object $summary -Name High -Default 0)
+                GeneratedUtc = [string](Get-CaDashboardProperty -Object $summary -Name GeneratedUtc -Default '')
             }
         }
         if ($json.PSObject.Properties.Name -contains 'Status' -and $json.PSObject.Properties.Name -contains 'Checks') {
@@ -581,158 +593,151 @@ function Get-CaDashboardHtml {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1821">
 <link rel="icon" type="image/png" href="/assets/icons/logo/favicon.png">
+<link rel="stylesheet" href="/assets/dashboard.css">
+<script src="/assets/dashboard.js" defer></script>
 <title>Claudit Cockpit</title>
-<style>
-:root{--bg:#f4f6f8;--panel:#fff;--ink:#17212b;--muted:#65717f;--line:#d9e0e7;--blue:#2166c2;--green:#16794c;--red:#bc2f34;--amber:#a96900;--violet:#6b4bb8}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px}
-button,input,select,textarea{font:inherit}button{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:6px;padding:8px 11px;cursor:pointer}button.primary{background:var(--blue);border-color:var(--blue);color:#fff}button.danger{border-color:#e2b3b5;color:var(--red)}button:disabled{opacity:.55;cursor:not-allowed}
-.app{min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}.side{background:#101820;color:#e9eef3;padding:18px 16px;border-right:1px solid #0b1117}.brandrow{display:flex;align-items:center;gap:10px}.brandlogo{width:42px;height:42px;object-fit:contain}.brand{font-size:19px;font-weight:700;margin-bottom:3px}.mode{color:#9fb0c1;font-size:12px}.nav{margin-top:26px;display:grid;gap:6px}.nav button{width:100%;text-align:left;background:transparent;border-color:transparent;color:#c9d5df}.nav button.active{background:#1f2d3b;color:#fff;border-color:#2e4257}
-.main{padding:18px 22px 28px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.top h1{margin:0;font-size:24px;letter-spacing:0}.top p{margin:5px 0 0;color:var(--muted);max-width:820px}.status{display:flex;gap:8px;align-items:center;white-space:nowrap;color:var(--muted);font-size:12px}.dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
-.grid{display:grid;gap:14px}.metrics{grid-template-columns:repeat(6,minmax(120px,1fr))}.metric{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}.metric .n{font-size:24px;font-weight:700}.metric .l{font-size:11px;text-transform:uppercase;color:var(--muted);margin-top:3px}
-.section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}.section h2{font-size:15px;margin:0 0 12px}.cols{display:grid;grid-template-columns:1.1fr .9fr;gap:14px;margin-top:14px}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.wide{grid-column:1/-1}label{display:grid;gap:5px;color:var(--muted);font-size:12px}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:8px 9px;background:#fff;color:var(--ink)}textarea{min-height:68px;resize:vertical}.services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.check{display:flex;align-items:center;gap:7px;color:var(--ink);font-size:13px}.check input{width:auto}.svcicon{width:20px;height:20px;object-fit:contain;flex:0 0 auto}.actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;border-bottom:1px solid #edf0f3;padding:8px 7px;vertical-align:top}th{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:700}td{font-size:13px}.pill{display:inline-block;border-radius:999px;padding:2px 8px;color:#fff;font-size:12px;font-weight:600}.pill.pass,.pill.succeeded{background:var(--green)}.pill.fail,.pill.failed{background:var(--red)}.pill.warning,.pill.finished{background:var(--amber)}.pill.running{background:var(--blue)}.pill.info{background:var(--muted)}
-.hint{font-size:12px;color:var(--muted);margin-top:4px}.authplan{display:grid;gap:8px;margin-top:8px}.gate{border:1px solid var(--line);border-radius:8px;padding:9px;background:#fbfcfd}.gate b{display:block;margin-bottom:2px}.gate small{color:var(--muted)}.gate .meta{margin-top:5px;font-size:12px;color:var(--muted)}
-.tools{display:flex;gap:8px;margin-bottom:10px}.tools input{max-width:360px}.link{color:var(--blue);text-decoration:none;font-weight:600}.log{background:#0d1117;color:#dbe7f3;border-radius:8px;padding:12px;min-height:240px;max-height:460px;overflow:auto;white-space:pre-wrap;font:12px Consolas,Monaco,monospace}.muted{color:var(--muted)}.hidden{display:none}.bar{height:7px;background:#e8edf2;border-radius:999px;overflow:hidden}.bar span{display:block;height:100%;background:var(--blue)}
-@media(max-width:1050px){.app{grid-template-columns:1fr}.side{position:sticky;top:0;z-index:2}.nav{grid-template-columns:repeat(3,1fr);margin-top:12px}.metrics{grid-template-columns:repeat(2,1fr)}.cols{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.services{grid-template-columns:1fr}}
-</style>
 </head>
-<body>
-<div class="app">
-  <aside class="side">
-    <div class="brandrow"><img class="brandlogo" src="/assets/icons/logo/claudit-logo-96.png" alt=""><div><div class="brand">Claudit Cockpit</div><div class="mode">local loopback operations console</div></div></div>
-    <div class="nav">
-      <button class="active" data-tab="overview">Overview</button>
-      <button data-tab="operations">Operations</button>
-      <button data-tab="reports">Reports</button>
+<body data-request-token="__CLAUDIT_REQUEST_TOKEN__">
+<div class="shell">
+  <aside class="sidebar" aria-label="Primary navigation">
+    <div class="brand-row">
+      <img class="brand-logo" src="/assets/icons/logo/claudit-logo-96.png" alt="" width="36" height="36">
+      <div><p class="brand-name">Claudit</p><div class="brand-mode">Local security cockpit</div></div>
     </div>
+    <nav class="nav" role="tablist" aria-label="Cockpit sections">
+      <button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="overview" data-tab="overview">Overview</button>
+      <button id="tab-operations" type="button" role="tab" aria-selected="false" aria-controls="operations" data-tab="operations" tabindex="-1">Operations</button>
+      <button id="tab-reports" type="button" role="tab" aria-selected="false" aria-controls="reports" data-tab="reports" tabindex="-1">Reports</button>
+    </nav>
+    <div class="sidebar-foot">Loopback only · read-only audit controls</div>
   </aside>
-  <main class="main">
-    <div class="top">
-      <div>
-        <h1>Audit surface dashboard</h1>
-        <p>Run offline preflight, launch guarded formal/passive/active audits, follow logs, and inspect generated evidence files from one local console.</p>
-      </div>
-      <div class="status"><span class="dot"></span><span id="serverState">connected</span></div>
+
+  <main class="workspace">
+    <div class="workspace-inner">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Security operations / local</p>
+          <h1>Cloud audit cockpit</h1>
+          <p class="topbar-copy">Plan bounded checks, follow execution, and review audit evidence without leaving the local console.</p>
+        </div>
+        <div id="connectionState" class="connection" data-state="online" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span><span id="serverState">Connected</span>
+        </div>
+      </header>
+
+      <section id="overview" class="tab" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="metrics" aria-label="Audit summary">
+          <div class="metric"><div class="metric-value" id="mReports">0</div><div class="metric-label">Report files</div></div>
+          <div class="metric"><div class="metric-value" id="mRuns">0</div><div class="metric-label">Operations</div></div>
+          <div class="metric" data-tone="accent"><div class="metric-value" id="mRunning">0</div><div class="metric-label">Running</div></div>
+          <div class="metric" data-tone="warning"><div class="metric-value" id="mProblems">0</div><div class="metric-label">Latest problems</div></div>
+          <div class="metric" data-tone="warning"><div class="metric-value" id="mNotEvaluated">0</div><div class="metric-label">Not evaluated</div></div>
+          <div class="metric" data-tone="danger"><div class="metric-value" id="mErrors">0</div><div class="metric-label">Execution errors</div></div>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="panel" aria-labelledby="operationPlanTitle">
+            <div class="panel-head"><div><h2 id="operationPlanTitle">New operation</h2><p>Scope the audit before any provider connection is opened.</p></div></div>
+            <div class="panel-body">
+              <div class="config-section">
+                <div class="section-title"><h3>1. Execution policy</h3><span>Required</span></div>
+                <div class="form-grid compact">
+                  <label class="field"><span class="field-label">Mode</span><select id="opMode"><option value="preflight">Offline preflight</option><option value="safe">Guarded launcher</option><option value="audit">Direct read-only audit</option></select></label>
+                  <label class="field"><span class="field-label">Control level</span><select id="controlLevel"><option>Formal</option><option selected>Passive</option><option>Active</option></select><span class="hint">Cumulative; Active is bounded and opt-in.</span></label>
+                  <label class="field"><span class="field-label">Report format</span><select id="format"><option>All</option><option>Html</option><option>Json</option><option>Markdown</option><option>Csv</option></select></label>
+                  <div class="field"><label class="field-label" for="retentionCount">Results to keep</label><div class="input-action"><input id="retentionCount" type="number" min="1" max="10000" list="retentionPresets" value="__CLAUDIT_RETENTION_COUNT__"><button id="saveRetention" type="button">Save</button></div><span class="hint">Completed runs only.</span><datalist id="retentionPresets"><option value="10"><option value="25"><option value="50"><option value="100"><option value="250"><option value="500"><option value="1000"></datalist></div>
+                </div>
+              </div>
+
+              <div class="config-section">
+                <div class="section-title"><h3>2. Audit surface</h3><span>Select one or more</span></div>
+                <div id="serviceList" class="services" aria-label="Services"></div>
+              </div>
+
+              <details class="details" open>
+                <summary>Identity and provider context</summary>
+                <div class="details-content">
+                  <div class="form-grid">
+                    <label class="field"><span class="field-label">Tenant label</span><input id="tenantName" value="Cloud tenant"></label>
+                    <label class="field"><span class="field-label">Cloud</span><select id="environment"><option>Global</option><option>USGov</option><option>USGovDOD</option><option>China</option></select></label>
+                    <label class="field"><span class="field-label">Run Pester</span><select id="runPester"><option value="false">No</option><option value="true">Yes</option></select></label>
+                    <label class="field m365" hidden><span class="field-label">Microsoft auth</span><select id="authMode"><option value="Interactive">Delegated operator</option><option value="AppOnly">App-only certificate</option></select><span class="hint">Client secrets are not used.</span></label>
+                    <label class="field m365 delegated" hidden><span class="field-label">Graph auth</span><select id="graphAuthMode"><option>DeviceCode</option><option>Browser</option></select></label>
+                    <label class="field m365 apponly" hidden><span class="field-label">Tenant ID</span><input id="tenantId" placeholder="00000000-0000-0000-0000-000000000000"></label>
+                    <label class="field m365 apponly" hidden><span class="field-label">Client ID</span><input id="clientId" placeholder="App registration ID"></label>
+                    <label class="field m365 apponly" hidden><span class="field-label">Certificate thumbprint</span><input id="certificateThumbprint" placeholder="Local certificate thumbprint"></label>
+                    <label class="field m365 apponly" hidden><span class="field-label">Exchange organization</span><input id="organization" placeholder="contoso.onmicrosoft.com"></label>
+                    <label class="field azure" hidden><span class="field-label">Azure subscription</span><input id="azureSubscription" placeholder="Optional"></label>
+                    <label class="field azure" hidden><span class="field-label">Azure tenant</span><input id="azureTenant" placeholder="Optional"></label>
+                    <label class="field aws" hidden><span class="field-label">AWS profile</span><input id="awsProfile" placeholder="Optional"></label>
+                    <label class="field aws" hidden><span class="field-label">AWS regions</span><input id="awsRegion" placeholder="eu-west-1, eu-central-1"></label>
+                    <label class="field gcp" hidden><span class="field-label">GCP project</span><input id="gcpProject" placeholder="Optional"></label>
+                    <label class="field gcp" hidden><span class="field-label">GCP account</span><input id="gcpAccount" placeholder="Optional"></label>
+                    <label class="field gcp" hidden><span class="field-label">GCP organization</span><input id="gcpOrganization" placeholder="Optional"></label>
+                    <label class="field tailscale" hidden><span class="field-label">Tailscale tailnet</span><input id="tailscaleTailnet" placeholder="example.com"></label>
+                    <label class="field tailscale" hidden><span class="field-label">Tailscale token env</span><input id="tailscaleApiTokenEnv" value="TAILSCALE_API_TOKEN"></label>
+                    <label class="field tailscale" hidden><span class="field-label">Tailscale auth</span><select id="tailscaleAuthScheme"><option>Auto</option><option>Basic</option><option>Bearer</option></select></label>
+                    <label class="field domain wide" hidden><span class="field-label">Authorized domains</span><input id="domain" placeholder="example.com, example.org"><span class="hint">Public checks run only for operator-authorized domains.</span></label>
+                    <label class="field domain wide" hidden><span class="field-label">Domain probes</span><input id="domainSubdomain" value="www,autodiscover,mail,vpn,portal,admin,dev,staging"></label>
+                    <label class="field vps" hidden><span class="field-label">VPS target</span><input id="vpsTarget" placeholder="Host or user@host; blank = local"></label>
+                    <label class="field vps" hidden><span class="field-label">VPS SSH user</span><input id="vpsSshUser" placeholder="Optional"></label>
+                    <label class="field vps" hidden><span class="field-label">VPS SSH port</span><input id="vpsSshPort" value="22" inputmode="numeric"></label>
+                    <label class="field vps" hidden><span class="field-label">VPS allowed ports</span><input id="vpsAllowedPublicPort" placeholder="80,443"></label>
+                    <label class="field active vps" hidden><span class="field-label">Active VPS probe ports</span><input id="vpsProbePort" placeholder="22,443"><span class="hint">Explicit ports only; ranges are rejected.</span></label>
+                    <label class="field active" hidden><span class="field-label">Active timeout (ms)</span><input id="activeTimeoutMs" value="3000" inputmode="numeric"></label>
+                    <label class="field active" hidden><span class="field-label">Authorize active probes</span><select id="confirmActiveProbes"><option value="false">No</option><option value="true">Yes, targets are authorized</option></select></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="details">
+                <summary>Authentication gates</summary>
+                <div class="details-content"><div id="authPlan" class="auth-plan"></div></div>
+              </details>
+
+              <div class="action-bar">
+                <button class="primary" id="startOp" type="button">Start operation</button>
+                <button id="refreshAll" type="button">Refresh</button>
+                <span class="action-note">Live authentication prompts appear in the operation log.</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel activity-panel" aria-labelledby="activityTitle">
+            <div class="panel-head"><div><h2 id="activityTitle">Live activity</h2><p id="logTitle">No operation selected</p></div></div>
+            <div class="panel-body">
+              <div class="activity-summary">
+                <div class="activity-fact"><span>Latest run</span><strong id="latestRun">None</strong></div>
+                <div class="activity-fact"><span>Status</span><strong id="latestStatus">Idle</strong></div>
+              </div>
+              <pre id="logPane" class="log" aria-live="polite">Select an operation to inspect its output.</pre>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="operations" class="tab" role="tabpanel" aria-labelledby="tab-operations" hidden>
+        <div class="panel table-panel">
+          <div class="panel-head"><div><h2>Operations</h2><p>Execution history and process outcomes.</p></div></div>
+          <div class="panel-body"><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Services</th><th>Output</th><th>Log</th></tr></thead><tbody id="operationsBody"></tbody></table></div></div>
+        </div>
+      </section>
+
+      <section id="reports" class="tab" role="tabpanel" aria-labelledby="tab-reports" hidden>
+        <div class="panel table-panel">
+          <div class="panel-head"><div><h2>Report files</h2><p>Generated evidence, summaries, and exports.</p></div></div>
+          <div class="panel-body">
+            <div class="table-tools"><input id="reportFilter" aria-label="Filter reports" placeholder="Filter by name, path, status, or service"><button id="reloadReports" type="button">Refresh reports</button></div>
+            <div class="table-scroll"><table><thead><tr><th>File</th><th>Type</th><th>Last write</th><th>Signal</th><th>Size</th><th>Open</th></tr></thead><tbody id="reportsBody"></tbody></table></div>
+          </div>
+        </div>
+      </section>
     </div>
-
-    <section id="overview" class="tab">
-      <div class="grid metrics">
-        <div class="metric"><div class="n" id="mReports">0</div><div class="l">report files</div></div>
-        <div class="metric"><div class="n" id="mRuns">0</div><div class="l">operations</div></div>
-        <div class="metric"><div class="n" id="mRunning">0</div><div class="l">running</div></div>
-        <div class="metric"><div class="n" id="mFail">0</div><div class="l">latest fail</div></div>
-        <div class="metric"><div class="n" id="mHigh">0</div><div class="l">latest high</div></div>
-        <div class="metric"><div class="n" id="mCritical">0</div><div class="l">latest critical</div></div>
-      </div>
-      <div class="cols">
-        <div class="section">
-          <h2>Operation plan</h2>
-          <div class="formgrid">
-            <label>Mode<select id="opMode"><option value="preflight">Offline preflight</option><option value="safe">Guarded launcher</option><option value="audit">Direct read-only audit</option></select></label>
-            <label>Control level<select id="controlLevel"><option>Formal</option><option selected>Passive</option><option>Active</option></select><div class="hint">Levels are cumulative; Active is bounded and opt-in.</div></label>
-            <label>Report format<select id="format"><option>All</option><option>Html</option><option>Json</option><option>Markdown</option><option>Csv</option></select></label>
-            <label>Results to keep<input id="retentionCount" type="number" min="1" max="10000" list="retentionPresets" value="__CLAUDIT_RETENTION_COUNT__"><datalist id="retentionPresets"><option value="10"><option value="25"><option value="50"><option value="100"><option value="250"><option value="500"><option value="1000"></datalist><button id="saveRetention" type="button">Apply retention</button><div class="hint">Completed runs; running jobs are never removed.</div></label>
-            <label>Tenant label<input id="tenantName" value="Cloud tenant"></label>
-            <label class="m365">Microsoft auth<select id="authMode"><option value="Interactive">Delegated operator</option><option value="AppOnly">App-only certificate</option></select><div class="hint">Client secrets are not used.</div></label>
-            <label class="m365 delegated">Graph auth<select id="graphAuthMode"><option>DeviceCode</option><option>Browser</option></select></label>
-            <label>Cloud<select id="environment"><option>Global</option><option>USGov</option><option>USGovDOD</option><option>China</option></select></label>
-            <label>Run Pester<select id="runPester"><option value="false">No</option><option value="true">Yes</option></select></label>
-            <div class="wide">
-              <label>Services</label>
-              <div id="serviceList" class="services"></div>
-            </div>
-            <label class="m365 apponly">TenantId<input id="tenantId" placeholder="00000000-0000-0000-0000-000000000000"></label>
-            <label class="m365 apponly">ClientId<input id="clientId" placeholder="app registration id"></label>
-            <label class="m365 apponly">Certificate thumbprint<input id="certificateThumbprint" placeholder="local certificate thumbprint"></label>
-            <label class="m365 apponly">Exchange organization<input id="organization" placeholder="contoso.onmicrosoft.com"></label>
-            <label class="azure">Azure subscription<input id="azureSubscription" placeholder="optional"></label>
-            <label class="azure">Azure tenant<input id="azureTenant" placeholder="optional"></label>
-            <label class="aws">AWS profile<input id="awsProfile" placeholder="optional"></label>
-            <label class="aws">AWS regions<input id="awsRegion" placeholder="eu-west-1,eu-central-1"></label>
-            <label class="gcp">GCP project<input id="gcpProject" placeholder="optional"></label>
-            <label class="gcp">GCP account<input id="gcpAccount" placeholder="optional"></label>
-            <label class="gcp">GCP organization<input id="gcpOrganization" placeholder="optional"></label>
-            <label class="tailscale">Tailscale tailnet<input id="tailscaleTailnet" placeholder="example.com"></label>
-            <label class="tailscale">Tailscale token env<input id="tailscaleApiTokenEnv" value="TAILSCALE_API_TOKEN"></label>
-            <label class="tailscale">Tailscale auth<select id="tailscaleAuthScheme"><option>Auto</option><option>Basic</option><option>Bearer</option></select></label>
-            <label class="domain wide">Authorized domains<input id="domain" placeholder="example.com,example.org"><div class="hint">Public checks run only for authorized domains.</div></label>
-            <label class="domain wide">Domain probes<input id="domainSubdomain" value="www,autodiscover,mail,vpn,portal,admin,dev,staging"></label>
-            <label class="vps">VPS target<input id="vpsTarget" placeholder="host or user@host; blank = local"></label>
-            <label class="vps">VPS SSH user<input id="vpsSshUser" placeholder="optional"></label>
-            <label class="vps">VPS SSH port<input id="vpsSshPort" value="22"></label>
-            <label class="vps">VPS allowed ports<input id="vpsAllowedPublicPort" placeholder="80,443"></label>
-            <label class="active vps">Active VPS probe ports<input id="vpsProbePort" placeholder="22,443"><div class="hint">Explicit ports only; ranges are not accepted.</div></label>
-            <label class="active">Active timeout (ms)<input id="activeTimeoutMs" value="3000"></label>
-            <label class="active">Authorize active probes<select id="confirmActiveProbes"><option value="false">No</option><option value="true">Yes, targets are authorized</option></select></label>
-            <div class="wide">
-              <label>Auth gates</label>
-              <div id="authPlan" class="authplan"></div>
-            </div>
-          </div>
-          <div class="actions">
-            <button class="primary" id="startOp">Start operation</button>
-            <button id="refreshAll">Refresh</button>
-            <span class="muted">Live mode may require device-code auth in the process log.</span>
-          </div>
-        </div>
-        <div class="section">
-          <h2>Latest operation log</h2>
-          <pre id="logPane" class="log">No operation selected.</pre>
-        </div>
-      </div>
-    </section>
-
-    <section id="operations" class="tab hidden">
-      <div class="section">
-        <h2>Operations</h2>
-        <table><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Services</th><th>Output</th><th>Log</th></tr></thead><tbody id="operationsBody"></tbody></table>
-      </div>
-    </section>
-
-    <section id="reports" class="tab hidden">
-      <div class="section">
-        <h2>Report files</h2>
-        <div class="tools"><input id="reportFilter" placeholder="Filter by name, path, status, service"><button id="reloadReports">Reload</button></div>
-        <table><thead><tr><th>File</th><th>Type</th><th>Last write</th><th>Signal</th><th>Size</th><th>Open</th></tr></thead><tbody id="reportsBody"></tbody></table>
-      </div>
-    </section>
   </main>
 </div>
-<script>
-const state={services:[],authCatalog:[],reports:[],operations:[],selectedOperation:null};
-const requestToken='__CLAUDIT_REQUEST_TOKEN__';
-const qs=s=>document.querySelector(s);
-const qsa=s=>Array.from(document.querySelectorAll(s));
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function fmtBytes(n){if(!n)return '0 B';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return `${n.toFixed(i?1:0)} ${u[i]}`}
-function pill(text){const c=String(text||'info').toLowerCase().replace(/[^a-z0-9_-]/g,'')||'info';return `<span class="pill ${c}">${esc(text||'Info')}</span>`}
-function localTime(iso){if(!iso)return '';try{return new Date(iso).toLocaleString()}catch{return iso}}
-function selectedServices(){return qsa('.svc:checked').map(x=>x.value)}
-function selectedSpecs(){const names=new Set(selectedServices());return state.services.filter(s=>names.has(s.Name))}
-function hasProvider(p){return selectedSpecs().some(s=>s.Provider===p)}
-function hasService(n){return selectedServices().includes(n)}
-const providerIcons={Microsoft365:'/assets/icons/cloud/icons8-azure-1-50.png',Azure:'/assets/icons/cloud/icons8-azure-50.png',AWS:'/assets/icons/cloud/icons8-amazon-aws-50.png',GCP:'/assets/icons/cloud/icons8-google-cloud-50.png',Internet:'/assets/icons/cloud/icons8-cloudflare-50.png',MultiCloud:'/assets/icons/cloud/icons8-cloud-50.png',SaaS:'/assets/icons/cloud/icons8-cloud-50.png',VPS:'/assets/icons/cloud/icons8-cloud-50.png'};
-function renderServices(){qs('#serviceList').innerHTML=state.services.map(s=>`<label class="check"><input class="svc" type="checkbox" value="${esc(s.Name)}" ${s.Default?'checked':''}><img class="svcicon" src="${esc(providerIcons[s.Provider]||providerIcons.MultiCloud)}" alt="">${esc(s.Name)}<span class="muted">${esc(s.Provider)}</span></label>`).join('');qsa('.svc').forEach(x=>x.onchange=refreshWizard);refreshWizard()}
-function setGroup(cls,show){qsa('.'+cls).forEach(x=>x.classList.toggle('hidden',!show))}
-function authMethod(provider){const app=qs('#authMode').value==='AppOnly';if(provider==='Microsoft365')return app?'AppCertificate':(qs('#graphAuthMode').value==='Browser'?'DelegatedBrowser':'DelegatedDeviceCode');if(provider==='Azure')return 'AzCli';if(provider==='AWS')return 'AwsCliProfile';if(provider==='GCP')return 'Gcloud';if(provider==='SaaS')return 'ApiTokenEnv';if(provider==='VPS')return 'LocalOrSsh';if(provider==='Internet')return 'Public';return 'ExistingProviderContexts'}
-function methodDescription(provider,method){const hit=state.authCatalog.find(x=>x.Provider===provider&&x.Method===method);return hit?hit.Description:''}
-function buildAuthPlan(){const specs=selectedSpecs();const plan=[];if(hasService('Domain'))plan.push({stage:10,name:'Public domain recon',provider:'Internet',method:'Public',services:['Domain'],gate:'Authorized domain scope'});const m365=specs.filter(s=>s.Provider==='Microsoft365').map(s=>s.Name);if(m365.length){const method=authMethod('Microsoft365');plan.push({stage:20,name:'Microsoft 365 credential gate',provider:'Microsoft365',method,services:m365,gate:'Graph/Exchange read-only connection'});plan.push({stage:30,name:'Microsoft 365 authenticated controls',provider:'Microsoft365',method,services:m365,gate:'Connected session'});}for(const p of ['Azure','AWS','GCP','SaaS','VPS','MultiCloud']){const items=specs.filter(s=>s.Provider===p).map(s=>s.Name);if(!items.length)continue;const method=authMethod(p);plan.push({stage:20,name:`${p} credential gate`,provider:p,method,services:items,gate:'CLI/API identity validation'});plan.push({stage:30,name:`${p} authenticated controls`,provider:p,method,services:items,gate:'Provider read-only context'});}return plan.sort((a,b)=>a.stage-b.stage||a.provider.localeCompare(b.provider))}
-function renderAuthPlan(){const plan=buildAuthPlan();qs('#authPlan').innerHTML=plan.map(p=>`<div class="gate"><b>${esc(p.stage)}. ${esc(p.name)}</b><small>${esc(p.gate)}</small><div class="meta">${esc(p.provider)} / ${esc(p.method)} / ${esc((p.services||[]).join(', '))}</div><div class="hint">${esc(methodDescription(p.provider,p.method))}</div></div>`).join('')||'<div class="muted">Select at least one service.</div>'}
-function refreshWizard(){const m365=hasProvider('Microsoft365');const app=qs('#authMode').value==='AppOnly';const active=qs('#controlLevel').value==='Active';setGroup('m365',m365);setGroup('delegated',m365&&!app);setGroup('apponly',m365&&app);setGroup('azure',hasProvider('Azure'));setGroup('aws',hasProvider('AWS'));setGroup('gcp',hasProvider('GCP'));setGroup('tailscale',hasService('Tailscale'));setGroup('domain',hasService('Domain'));setGroup('vps',hasService('VPS'));setGroup('active',active);qsa('.active.vps').forEach(x=>x.classList.toggle('hidden',!(active&&hasService('VPS'))));renderAuthPlan()}
-function reportSignal(r){const s=r.Summary;if(!s)return '<span class="muted">raw file</span>';if(s.Kind==='audit')return `F ${s.Fail||0} / H ${s.High||0} / C ${s.Critical||0}`;if(s.Kind==='preflight')return `${pill(s.Status)} ${s.Fail||0} fail, ${s.Warning||0} warn`;if(s.Error)return 'parse error';return s.Kind}
-function latestAudit(){return state.reports.find(r=>r.Summary&&r.Summary.Kind==='audit')}
-function renderMetrics(){const latest=latestAudit();qs('#mReports').textContent=state.reports.length;qs('#mRuns').textContent=state.operations.length;qs('#mRunning').textContent=state.operations.filter(o=>o.Status==='Running').length;qs('#mFail').textContent=latest?.Summary?.Fail||0;qs('#mHigh').textContent=latest?.Summary?.High||0;qs('#mCritical').textContent=latest?.Summary?.Critical||0}
-function renderOperations(){qs('#operationsBody').innerHTML=state.operations.map(o=>`<tr><td><strong>${esc(o.Id)}</strong><br><span class="muted">${esc(localTime(o.StartedUtc))}</span></td><td>${esc(o.Mode)} / ${esc(o.ControlLevel||'Passive')}</td><td>${pill(o.Status)} ${o.ExitCode!==null&&o.ExitCode!==undefined?'code '+esc(o.ExitCode):''}</td><td>${esc((o.Services||[]).join(', '))}</td><td><span class="muted">${esc(o.OutputDirectory||'')}</span></td><td><button data-log="${esc(o.Id)}">View</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No operations yet.</td></tr>';qsa('[data-log]').forEach(b=>b.onclick=()=>loadLog(b.dataset.log))}
-function renderReports(){const f=qs('#reportFilter').value.toLowerCase();const rows=state.reports.filter(r=>(r.Name+' '+r.RelativePath+' '+reportSignal(r)).toLowerCase().includes(f));qs('#reportsBody').innerHTML=rows.map(r=>`<tr><td><strong>${esc(r.Name)}</strong><br><span class="muted">${esc(r.RelativePath)}</span></td><td>${esc(r.Extension)}</td><td>${esc(localTime(r.LastWriteUtc))}</td><td>${reportSignal(r)}</td><td>${esc(fmtBytes(r.SizeBytes))}</td><td><a class="link" target="_blank" href="/api/report?path=${encodeURIComponent(r.RelativePath)}">open</a></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No reports found.</td></tr>'}
-async function api(path,opts={}){opts.headers={...(opts.headers||{}),'x-claudit-token':requestToken};const res=await fetch(path,opts);if(!res.ok)throw new Error(await res.text());return res.json()}
-async function refresh(){try{const s=await api('/api/state');state.services=s.services;state.authCatalog=s.authCatalog||[];state.reports=s.reports;state.operations=s.operations;if(document.activeElement!==qs('#retentionCount'))qs('#retentionCount').value=s.retentionCount||100;if(!qs('#serviceList').children.length)renderServices();refreshWizard();renderMetrics();renderOperations();renderReports();qs('#serverState').textContent='connected'}catch(e){qs('#serverState').textContent=e.message}}
-async function loadLog(id){state.selectedOperation=id;const data=await api('/api/operations/log?id='+encodeURIComponent(id));qs('#logPane').textContent=(data.stdout||'')+(data.stderr?'\n\n[stderr]\n'+data.stderr:'')||'No log output yet.'}
-async function saveRetention(){await api('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({retentionCount:Number(qs('#retentionCount').value)})});await refresh()}
-async function startOperation(){const body={mode:qs('#opMode').value,retentionCount:Number(qs('#retentionCount').value),controlLevel:qs('#controlLevel').value,confirmActiveProbes:qs('#confirmActiveProbes').value==='true',activeTimeoutMs:qs('#activeTimeoutMs').value,vpsProbePort:qs('#vpsProbePort').value,service:selectedServices(),format:qs('#format').value,tenantName:qs('#tenantName').value,environment:qs('#environment').value,authMode:qs('#authMode').value,graphAuthMode:qs('#graphAuthMode').value,tenantId:qs('#tenantId').value,clientId:qs('#clientId').value,certificateThumbprint:qs('#certificateThumbprint').value,organization:qs('#organization').value,runPester:qs('#runPester').value==='true',azureSubscription:qs('#azureSubscription').value,azureTenant:qs('#azureTenant').value,awsProfile:qs('#awsProfile').value,awsRegion:qs('#awsRegion').value,gcpProject:qs('#gcpProject').value,gcpAccount:qs('#gcpAccount').value,gcpOrganization:qs('#gcpOrganization').value,tailscaleTailnet:qs('#tailscaleTailnet').value,tailscaleApiTokenEnv:qs('#tailscaleApiTokenEnv').value,tailscaleAuthScheme:qs('#tailscaleAuthScheme').value,domain:qs('#domain').value,domainSubdomain:qs('#domainSubdomain').value,vpsTarget:qs('#vpsTarget').value,vpsSshUser:qs('#vpsSshUser').value,vpsSshPort:qs('#vpsSshPort').value,vpsAllowedPublicPort:qs('#vpsAllowedPublicPort').value};const op=await api('/api/operations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});await refresh();await loadLog(op.Id)}
-qsa('.nav button').forEach(b=>b.onclick=()=>{qsa('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');qsa('.tab').forEach(x=>x.classList.add('hidden'));qs('#'+b.dataset.tab).classList.remove('hidden')});
-qs('#authMode').onchange=refreshWizard;qs('#graphAuthMode').onchange=refreshWizard;qs('#controlLevel').onchange=refreshWizard;qs('#saveRetention').onclick=()=>saveRetention().catch(e=>alert(e.message));qs('#startOp').onclick=()=>startOperation().catch(e=>alert(e.message));qs('#refreshAll').onclick=refresh;qs('#reloadReports').onclick=refresh;qs('#reportFilter').oninput=renderReports;setInterval(()=>{refresh();if(state.selectedOperation)loadLog(state.selectedOperation).catch(()=>{})},5000);refresh();
-</script>
+<div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
 '@
@@ -881,8 +886,8 @@ function Send-CaDashboardResponse {
     )
 
     $stream = $Client.GetStream()
-    $scriptPolicy = if ($DashboardDocument) { "'unsafe-inline'" } else { "'none'" }
-    $csp = "default-src 'none'; style-src 'unsafe-inline'; script-src $scriptPolicy; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    $resourcePolicy = if ($DashboardDocument) { "'self'" } else { "'none'" }
+    $csp = "default-src 'none'; style-src $resourcePolicy; script-src $resourcePolicy; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
     $header = "HTTP/1.1 $StatusCode $Reason`r`nContent-Type: $ContentType`r`nContent-Length: $($Body.Length)`r`nCache-Control: no-store`r`nContent-Security-Policy: $csp`r`nCross-Origin-Resource-Policy: same-origin`r`nReferrer-Policy: no-referrer`r`nX-Content-Type-Options: nosniff`r`nX-Frame-Options: DENY`r`nConnection: close`r`n`r`n"
     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     $stream.Write($headerBytes, 0, $headerBytes.Length)

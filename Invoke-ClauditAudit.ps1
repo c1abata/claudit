@@ -169,15 +169,56 @@ if ($needMicrosoft) {
 else {
     Write-Host 'Claudit: no Microsoft 365 connection required for selected services.' -ForegroundColor Cyan
 }
-Connect-Claudit @connectParams | Out-Null
+$runtimeFindings = [System.Collections.Generic.List[object]]::new()
+$connected = $false
+$collectServices = [System.Collections.Generic.List[string]]::new()
+foreach ($serviceName in $Service) { $collectServices.Add($serviceName) }
+
+if ($needMicrosoft) {
+    try {
+        Connect-Claudit @connectParams | Out-Null
+        $connected = $true
+    }
+    catch {
+        $connectionError = $_
+        # Connect-Claudit can fail after one subsystem connected; always clear
+        # partial Graph/Exchange state before continuing other providers.
+        Disconnect-Claudit
+        $blockedServices = @($serviceSpecs | Where-Object Provider -eq 'Microsoft365')
+        foreach ($blocked in $blockedServices) {
+            $checkId = (($blocked.Prefix -replace '[^A-Za-z]', '').ToUpperInvariant()) + '-000'
+            $runtimeFindings.Add((Invoke-CaCheck -Service $blocked.Name -CheckId $checkId -Title "$($blocked.Name) read-only connection established" -Body {
+                throw $connectionError.Exception
+            }))
+            [void]$collectServices.Remove($blocked.Name)
+        }
+        Write-Warning "Microsoft 365 connection failed; unaffected services will continue. $($connectionError.Exception.Message)"
+    }
+}
 
 try {
     Write-Host "Claudit: $($ControlLevel.ToLowerInvariant()) audit of $($Service -join ', ')..." -ForegroundColor Cyan
-    $findings = @(Get-CaAllFindings -Service $Service)
+    $findings = @($runtimeFindings)
+    if ($collectServices.Count -gt 0) {
+        $findings += @(Get-CaAllFindings -Service @($collectServices))
+    }
     $levelRank = @{ Formal = 1; Passive = 2; Active = 3 }
     $findings = @($findings | Where-Object { $levelRank[$_.ControlLevel] -le $levelRank[$ControlLevel] })
     if ($ControlLevel -eq 'Active') {
-        $active = @(Get-CaActiveFindings -Service $Service -VpsProbePort $VpsProbePort -TimeoutMs $ActiveTimeoutMs)
+        try {
+            $active = @(Get-CaActiveFindings -Service @($collectServices) -VpsProbePort $VpsProbePort -TimeoutMs $ActiveTimeoutMs)
+        }
+        catch {
+            $activeError = $_
+            $active = @()
+            foreach ($activeService in @($collectServices | Where-Object { $_ -in @('Domain', 'VPS') })) {
+                $activeSpec = Get-CaServiceSpec -Name $activeService
+                $checkId = (($activeSpec.Prefix -replace '[^A-Za-z]', '').ToUpperInvariant()) + '-000'
+                $active += Invoke-CaCheck -Service $activeService -CheckId $checkId -Title "$activeService active probe collection completed" -ControlLevel Active -Body {
+                    throw $activeError.Exception
+                }
+            }
+        }
         $findings = @($findings) + @($active)
         if ($active.Count -eq 0) {
             Write-Warning 'Active level selected, but no Domain or VPS service was selected; no network probes were added.'
@@ -195,8 +236,20 @@ try {
     $s = $report.Summary
 
     Write-Host ''
-    Write-Host ("Total {0} | Pass {1} | Fail {2} | Warning {3} | Skipped {4} | Error {5}" -f $s.Total, $s.Pass, $s.Fail, $s.Warning, $s.Skipped, $s.Error)
-    Write-Host ("Failures by severity -> Critical {0} | High {1} | Medium {2} | Low {3}" -f $s.Critical, $s.High, $s.Medium, $s.Low) -ForegroundColor Yellow
+    $outcomeColor = if ($s.Outcome -eq 'ExecutionError') { 'Red' } elseif ($s.Outcome -eq 'IssuesFound') { 'Yellow' } elseif ($s.Outcome -eq 'Attention') { 'DarkYellow' } else { 'Green' }
+    Write-Host ("Outcome {0} | coverage {1}% ({2}/{3})" -f $s.Outcome, $s.CoveragePercent, $s.Evaluated, $s.Total) -ForegroundColor $outcomeColor
+    Write-Host ("Problems {0} | Fail {1} | Warning {2} | Investigate {3} | Execution errors {4} | Skipped {5}" -f $s.ProblemsDetected, $s.Fail, $s.Warning, $s.Investigate, $s.BlockingErrors, $s.Skipped)
+    Write-Host ("Risk severity -> Critical {0} | High {1} | Medium {2} | Low {3}" -f $s.Critical, $s.High, $s.Medium, $s.Low) -ForegroundColor Yellow
+    if ($report.Problems.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Problems detected:' -ForegroundColor Yellow
+        $report.Problems | Select-Object -First 12 CheckId, Service, Status, Severity, Title | Format-Table -AutoSize | Out-Host
+    }
+    if ($report.ExecutionErrors.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Execution errors blocking evaluation:' -ForegroundColor Red
+        $report.ExecutionErrors | Select-Object CheckId, Service, FailureCategory, DiagnosticId, Detail | Format-Table -Wrap -AutoSize | Out-Host
+    }
     foreach ($f in $report.Files) { Write-Host "Report: $f" -ForegroundColor Green }
 
     # Drift comparison against a previous JSON report.
@@ -259,9 +312,10 @@ try {
     }
 }
 finally {
-    Disconnect-Claudit
+    if ($connected) { Disconnect-Claudit }
 }
 
-# Non-zero exit if high-impact issues or unevaluated checks exist (useful for scheduled tasks).
-if (($s.Critical + $s.High + $s.Error) -gt 0 -or $pesterFailed) { exit 2 }
+# Exit 3 means incomplete evaluation, 2 means high-impact findings/test failure.
+if ($s.RecommendedExitCode -eq 3) { exit 3 }
+if ($s.RecommendedExitCode -eq 2 -or $pesterFailed) { exit 2 }
 exit 0

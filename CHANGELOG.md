@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- Isolate every service collector so one provider failure cannot discard results
+  already collected from other audit surfaces.
+- Add structured execution diagnostics, overall audit outcome, evaluation
+  coverage, per-service summaries and dedicated problem/error/not-evaluated
+  sections to JSON, HTML, Markdown, CSV, console and cockpit report signals.
+- Distinguish exit code 3 (incomplete evaluation) from exit code 2 (high-impact
+  finding or requested test failure).
+- Redesign the loopback cockpit with a compact responsive navigation, clearer
+  operation flow, contextual provider fields, accessible tabs, durable tables,
+  inline progress states and non-blocking feedback.
+- Split dashboard HTML, CSS and JavaScript into packaged browser-native assets,
+  following the lightweight WebUI model without adding a client framework or a
+  Node.js runtime dependency.
+- Remove API-driven HTML string rendering and tighten the dashboard CSP to
+  same-origin scripts and styles.
+
 ## 0.2.0 - 2026-07-18
 
 - Add a hardened Ubuntu systemd orchestrator with persistent `/var/lib/claudit` storage.

@@ -65,8 +65,12 @@ every domain, VPS target and VPS probe port.
   blue-team inventory workflows.
 * Evaluates the tenant against an editable JSON **baseline** (CIS / Microsoft Secure Score aligned).
 * Emits a flat list of **findings** (`Pass` / `Fail` / `Warning` / `Info` / `Error` / `Skipped` / `Investigate`,
-  with a severity and **CISA/CIS control IDs**).
-* Renders **HTML**, **JSON**, **Markdown** and **CSV** reports.
+  with outcome, blocking flag, severity and **CISA/CIS control IDs**). `Fail`
+  means a confirmed audit problem, `Error` means execution blocked that check,
+  and `Skipped` means intentionally not evaluated.
+* Renders **HTML**, **JSON**, **Markdown** and **CSV** reports with an overall
+  outcome, evaluation coverage, per-service summary, problems, execution errors
+  with diagnostic IDs, not-evaluated controls and the complete result set.
 * Redacts common token/webhook patterns and hardens Markdown/CSV output against report injection.
 * Detects **configuration drift** between two runs (`Compare-ClauditResult`).
 * Optionally posts a summary to **Teams or Slack** via an incoming webhook.
@@ -227,7 +231,12 @@ Local web cockpit for operations, logs and report history:
 # open the Local URL printed at startup
 ```
 
-The cockpit is a PowerShell server with self-contained HTML/CSS/vanilla JS. By
+The cockpit is a PowerShell server with packaged HTML/CSS/vanilla JS assets. Its
+frontend follows the lightweight [WebUI](https://github.com/webui-dev/webui)
+model: browser-native controls, no Node.js runtime, no client framework and no
+remote UI dependencies. Structure, styling and behavior are separate files;
+dynamic API data is rendered with DOM nodes rather than HTML strings, and the
+document CSP accepts scripts and styles only from the local asset route. By
 default it binds to private loopback `127.0.0.1` and tries the next port if
 `8765` is already in use. Non-loopback binding is rejected because this is a
 single-operator console without a multi-user authentication layer. It can start offline
@@ -394,9 +403,10 @@ Unattended (scheduled task) with certificate-based app-only auth — no secrets:
     -Organization contoso.onmicrosoft.com
 ```
 
-The script exits with code **2** when any Critical/High failure or runtime
-`Error` finding is found, so a scheduled task can surface incomplete or risky
-audits.
+The script exits with code **0** when no high-impact condition exists, **2** for
+Critical/High findings (or a requested test failure), and **3** when one or more
+execution errors left controls unevaluated. This keeps confirmed security risk
+separate from incomplete audit coverage in scheduled tasks.
 
 PowerShell Gallery is used only when you explicitly run
 `Install-ClauditPrerequisites.ps1 -ConfirmInstall`. Treat Gallery packages as
