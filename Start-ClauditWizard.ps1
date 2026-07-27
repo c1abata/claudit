@@ -421,7 +421,7 @@ Write-WizardPanel -Title 'Claudit safe execution wizard' -Lines @(
 $profile = Read-WizardProfile
 $profile.TenantName = Read-WizardText -Prompt 'Tenant/display name' -Default $profile.TenantName
 $profile.Service = @(Read-WizardServices -Default @($profile.Service))
-$profile.Format = Read-WizardChoice -Prompt 'Formato report' -Options @('All', 'Html', 'Json', 'Markdown', 'Csv') -Default $profile.Format
+$profile.Format = Read-WizardChoice -Prompt 'Formato report' -Options @('All', 'Html', 'Json', 'Markdown', 'Csv', 'Ocsf', 'Oscal', 'Catalog') -Default $profile.Format
 $profile.Environment = Read-WizardChoice -Prompt 'Cloud Microsoft' -Options @('Global', 'USGov', 'USGovDOD', 'China') -Default $profile.Environment
 $profile.OutputRoot = Read-WizardText -Prompt 'Directory radice report' -Default $profile.OutputRoot
 $profile.BaselinePath = Read-WizardText -Prompt 'Baseline custom opzionale' -Default $profile.BaselinePath

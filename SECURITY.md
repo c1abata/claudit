@@ -30,6 +30,6 @@ serve arbitrary workspace files.
 
 ## Supported release
 
-Security fixes target the current `0.1.x` line. Reproduce suspected issues with
+Security fixes target the current `0.3.x` line. Reproduce suspected issues with
 synthetic data where possible and record the command, exit code and redacted
 error; do not attach tenant exports or credentials.

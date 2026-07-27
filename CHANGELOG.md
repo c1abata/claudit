@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-07-27
+
+- Fail closed when an expected service/control-level catalog entry produces no
+  finding: missing control results now become stable blocking errors, affect
+  coverage and exit code 3, and remain explicit in provenance completeness.
+- Record Formal/Passive/Active applicability in the versioned control catalog
+  and correct the built-in help text for runtime error exit semantics.
+- Emit OCSF 1.8 Compliance Finding (`class_uid` 2003) with normalized
+  compliance status instead of misclassifying audit checks as detection alerts.
+
+## 0.3.0 - 2026-07-20
+
+- Make skipped/error provider evaluation fail closed with explicit
+  `Incomplete`/`ExecutionError` outcomes, coverage semantics and exit code 3.
+- Correct confirmed Entra, AWS, Azure, GCP, DNSSEC, SSH and inventory false
+  positives; add deterministic provider-denial and edge-policy regressions.
+- Introduce report schema v2 with producer/baseline/dependency provenance,
+  per-service completeness, resource-scoped finding identities and SHA-256
+  artifact manifests; retain schema-v1 drift compatibility.
+- Add OCSF 1.8 Detection Finding JSONL, OSCAL 1.2.1 Assessment Results and a
+  versioned control catalog with explicit external-framework coverage limits.
+- Pin PowerShell dependencies, add the MIT license artifact, use native process
+  argument lists, verify temporary OAuth profile deletion and make Ubuntu
+  upgrades remove stale managed source files.
+- Preserve pre-0.3 baselines, wizard profiles and report history during Ubuntu
+  upgrades; merge policy overrides over new defaults and stop safely on invalid
+  legacy data.
+- Normalize skipped-only schema-v1 history as incomplete in the upgraded
+  dashboard instead of retaining the former false-green outcome.
 
 - Isolate every service collector so one provider failure cannot discard results
   already collected from other audit surfaces.

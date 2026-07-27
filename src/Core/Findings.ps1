@@ -5,12 +5,13 @@
     emits one or more findings and never mutates anything. Keeping a single,
     flat shape makes reporting, filtering and Pester assertions trivial.
 
-    Maester-inspired upgrades (v0.2):
-      * Statuses extended with 'Skipped' (e.g. not licensed / not connected) and
-        'Investigate' (passed but needs human review).
+    Maester-inspired upgrades:
+      * 'Skipped' means required but not evaluated; 'NotApplicable' means scope
+        was positively evaluated and the control does not apply.
       * Each finding is auto-tagged with control-framework IDs (CISA SCuBA / CIS)
         looked up by CheckId, so reports can show governance coverage.
       * Optional MarkdownDetail for rich, portal-deep-linked evidence.
+      * Stable privacy-preserving FindingId for resource-scoped drift.
 #>
 
 $script:CaSeverityRank = @{
@@ -37,7 +38,7 @@ function Get-CaFailureCategory {
     if ($signal -match '429|throttl|rate.?limit|too many requests') { return 'RateLimit' }
     if ($signal -match 'timed?\s*out|timeout|taskcanceledexception') { return 'Timeout' }
     if ($signal -match 'unauthenticated|authentication|not logged|login required|invalid token|expired token|credential') { return 'Authentication' }
-    if ($signal -match 'unauthorized|forbidden|access denied|insufficient privilege|permission|rbac|scope') { return 'Authorization' }
+    if ($signal -match 'unauthorized|forbidden|access[ _-]?denied|insufficient privilege|permission[ _-]?denied|rbac|scope') { return 'Authorization' }
     if ($signal -match 'commandnotfound|not installed|not recognized|cannot find.*(module|command|executable)|no such file') { return 'Prerequisite' }
     if ($signal -match 'dns|socket|network|connection|connectivity|name resolution|host unreachable|tls|ssl') { return 'Connectivity' }
     if ($signal -match 'json|parse|format|schema|invalid data|unexpected response') { return 'Data' }
@@ -59,6 +60,16 @@ function Get-CaFailureRecommendation {
     }
 }
 
+function ConvertTo-CaSafeReference {
+    param([AllowNull()][string]$Reference)
+    if ([string]::IsNullOrWhiteSpace($Reference)) { return '' }
+    $uri = $null
+    if (-not [uri]::TryCreate($Reference, [System.UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') {
+        return ''
+    }
+    ConvertTo-CaRedactedText -Text $uri.AbsoluteUri
+}
+
 function New-CaFinding {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -71,7 +82,7 @@ function New-CaFinding {
 
         [Parameter(Mandatory)][string]$Title,
 
-        [Parameter(Mandatory)][ValidateSet('Pass', 'Fail', 'Warning', 'Info', 'Error', 'Skipped', 'Investigate')]
+        [Parameter(Mandatory)][ValidateSet('Pass', 'Fail', 'Warning', 'Info', 'Error', 'Skipped', 'NotApplicable', 'Investigate')]
         [string]$Status,
 
         [ValidateSet('Formal', 'Passive', 'Active')]
@@ -98,13 +109,24 @@ function New-CaFinding {
 
         [string]$FailureCode = '',
         [string]$ExceptionType = '',
-        [string]$DiagnosticId = ''
+        [string]$DiagnosticId = '',
+
+        [string]$ScopeId = '',
+        [string]$ResourceType = '',
+        [string]$ResourceId = ''
     )
 
     $Service = (Get-CaServiceSpec -Name $Service).Name
+    $metadata = Get-CaCheckMetadata -CheckId $CheckId -AllowUncataloged
+    $effectiveRecommendation = if ([string]::IsNullOrWhiteSpace($Recommendation)) {
+        [string]$metadata.Remediation
+    }
+    else {
+        $Recommendation
+    }
 
-    # A passing / informational / skipped check carries no risk weight.
-    $effectiveSeverity = if ($Status -in @('Pass', 'Info', 'Skipped')) { 'Info' } else { $Severity }
+    # A passing, informational or non-applicable check carries no risk weight.
+    $effectiveSeverity = if ($Status -in @('Pass', 'Info', 'Skipped', 'NotApplicable')) { 'Info' } else { $Severity }
 
     # Control-framework mapping is centralised in Controls.ps1 and looked up by id.
     $controlIds = @()
@@ -119,6 +141,7 @@ function New-CaFinding {
         'Investigate' { 'Attention' }
         'Error'       { 'ExecutionError' }
         'Skipped'     { 'NotEvaluated' }
+        'NotApplicable' { 'NotApplicable' }
         default       { 'Informational' }
     }
     if ($Status -ne 'Error') {
@@ -132,28 +155,48 @@ function New-CaFinding {
         if ([string]::IsNullOrWhiteSpace($DiagnosticId)) { $DiagnosticId = New-CaDiagnosticId }
     }
 
+    $identity = Get-CaFindingIdentity -Service $Service -CheckId $CheckId -ScopeId $ScopeId -ResourceType $ResourceType -ResourceId $ResourceId
+    $redactedEvidence = ConvertTo-CaRedactedObject -InputObject $Evidence
+
     [pscustomobject]@{
         PSTypeName     = 'Claudit.Finding'
+        FindingId      = $identity.FindingId
         Service        = $Service
         CheckId        = $CheckId
+        ScopeId         = ConvertTo-CaRedactedText -Text $ScopeId
+        ResourceType    = ConvertTo-CaRedactedText -Text $ResourceType
+        ResourceId      = ConvertTo-CaRedactedText -Text $ResourceId
+        ResourceKeyHash = $identity.ResourceKeyHash
+        EvidenceHash    = Get-CaObjectSha256 -Value $redactedEvidence
         ControlLevel   = $ControlLevel
         Title          = ConvertTo-CaRedactedText -Text $Title
         Status         = $Status
         Outcome        = $outcome
         Severity       = $effectiveSeverity
         SeverityRank   = $script:CaSeverityRank[$effectiveSeverity]
-        IsBlocking     = ($Status -eq 'Error')
+        IsBlocking     = ($Status -in @('Error', 'Skipped'))
         Detail         = ConvertTo-CaRedactedText -Text $Detail
         MarkdownDetail = ConvertTo-CaRedactedText -Text $MarkdownDetail
-        Recommendation = ConvertTo-CaRedactedText -Text $Recommendation
-        Reference      = ConvertTo-CaRedactedText -Text $Reference
+        Recommendation = ConvertTo-CaRedactedText -Text $effectiveRecommendation
+        Reference      = ConvertTo-CaSafeReference -Reference $Reference
         ControlIds     = $controlIds
+        MetadataCatalogVersion = [string]$metadata.CatalogVersion
+        MetadataProfile = [string]$metadata.Profile
+        MetadataSource = [string]$metadata.Source
+        DefaultSeverity = [string]$metadata.DefaultSeverity
+        Categories      = @($metadata.Categories | ForEach-Object { [string]$_ })
+        Threats         = @($metadata.Threats | ForEach-Object { [string]$_ })
+        Risk            = ConvertTo-CaRedactedText -Text ([string]$metadata.Risk)
+        DependsOn       = @($metadata.DependsOn | ForEach-Object { [string]$_ })
+        RelatedTo       = @($metadata.RelatedTo | ForEach-Object { [string]$_ })
         SkippedReason  = ConvertTo-CaRedactedText -Text $SkippedReason
         FailureCategory = $FailureCategory
         FailureCode    = ConvertTo-CaRedactedText -Text $FailureCode
         ExceptionType  = ConvertTo-CaRedactedText -Text $ExceptionType
         DiagnosticId   = $DiagnosticId
-        Evidence       = ConvertTo-CaRedactedObject -InputObject $Evidence
+        IsSuppressed    = $false
+        Suppression     = $null
+        Evidence       = $redactedEvidence
         TimestampUtc   = [DateTime]::UtcNow.ToString('o')
     }
 }

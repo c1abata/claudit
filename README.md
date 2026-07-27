@@ -15,10 +15,23 @@ Azure checks use `az` list/show/REST GET calls, Google Cloud checks use
 checks run local or SSH read-only POSIX commands, and Domain mode performs
 passive DNS lookups only against operator-supplied domains.
 
-**Release status:** `0.2.0` stable for private operator use. The supported path is
+**Release status:** `0.3.1` stable for private operator use. The supported path is
 PowerShell 7.2+, the guarded launcher/wizard, a reviewed baseline and least-
 privilege read-only identities. Provider APIs and permissions still require live
 validation in the target environment.
+
+The maintainer release archive is generated from a clean Git commit, never from
+an arbitrary working tree:
+
+```powershell
+pwsh -NoProfile -File ./Build-ClauditRelease.ps1
+```
+
+This creates `dist/claudit-<version>.zip` and a matching `.sha256` file. On
+Windows, extract the archive and run `pwsh -NoProfile -File ./claudit.ps1
+doctor`; Claudit is portable and does not require a machine-wide installation.
+On Ubuntu, extract it and run `sudo bash ./install-ubuntu.sh` from the extracted
+directory.
 
 Claudit takes inspiration from the excellent FOSS [Maester](https://maester.dev)
 project: control-framework mapping (CISA SCuBA / CIS), EIDSCA-style identity
@@ -64,13 +77,16 @@ every domain, VPS target and VPS probe port.
 * Captures a normalized multi-cloud asset inventory inspired by Cloudlist-style
   blue-team inventory workflows.
 * Evaluates the tenant against an editable JSON **baseline** (CIS / Microsoft Secure Score aligned).
-* Emits a flat list of **findings** (`Pass` / `Fail` / `Warning` / `Info` / `Error` / `Skipped` / `Investigate`,
-  with outcome, blocking flag, severity and **CISA/CIS control IDs**). `Fail`
+* Emits a flat list of **findings** (`Pass` / `Fail` / `Warning` / `Info` / `Error` / `Skipped` / `NotApplicable` / `Investigate`,
+  with stable `FindingId`, outcome, blocking flag, severity and **CISA/CIS control IDs**). `Fail`
   means a confirmed audit problem, `Error` means execution blocked that check,
-  and `Skipped` means intentionally not evaluated.
-* Renders **HTML**, **JSON**, **Markdown** and **CSV** reports with an overall
+  `Skipped` means a required check was not evaluated, and `NotApplicable` means
+  non-applicability was positively established.
+* Renders **HTML**, schema-v2 **JSON**, **Markdown** and **CSV** reports with an overall
   outcome, evaluation coverage, per-service summary, problems, execution errors
   with diagnostic IDs, not-evaluated controls and the complete result set.
+  `All` also emits OCSF 1.8 JSONL, OSCAL 1.2.1 Assessment Results, a versioned
+  Claudit control catalog and a SHA-256 artifact manifest.
 * Redacts common token/webhook patterns and hardens Markdown/CSV output against report injection.
 * Detects **configuration drift** between two runs (`Compare-ClauditResult`).
 * Optionally posts a summary to **Teams or Slack** via an incoming webhook.
@@ -82,13 +98,13 @@ every domain, VPS target and VPS probe port.
 * Microsoft 365 modules (install per-user, no admin rights needed):
 
   ```powershell
-  Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-  Install-Module Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser
-  Install-Module Microsoft.Graph.Identity.SignIns -Scope CurrentUser
-  Install-Module Microsoft.Graph.Applications -Scope CurrentUser
-  Install-Module Microsoft.Graph.Users -Scope CurrentUser
-  Install-Module ExchangeOnlineManagement -Scope CurrentUser
-  Install-Module Pester -MinimumVersion 5.0 -Scope CurrentUser   # optional, for tests
+  Install-Module Microsoft.Graph.Authentication -RequiredVersion 2.38.0 -Scope CurrentUser
+  Install-Module Microsoft.Graph.Identity.DirectoryManagement -RequiredVersion 2.38.0 -Scope CurrentUser
+  Install-Module Microsoft.Graph.Identity.SignIns -RequiredVersion 2.38.0 -Scope CurrentUser
+  Install-Module Microsoft.Graph.Applications -RequiredVersion 2.38.0 -Scope CurrentUser
+  Install-Module Microsoft.Graph.Users -RequiredVersion 2.38.0 -Scope CurrentUser
+  Install-Module ExchangeOnlineManagement -RequiredVersion 3.10.0 -Scope CurrentUser
+  Install-Module Pester -RequiredVersion 5.8.0 -Scope CurrentUser   # optional, for tests
   ```
 
   The EIDSCA-style checks use raw Graph calls (`Invoke-MgGraphRequest`), so
@@ -279,7 +295,20 @@ ssh -L 8765:127.0.0.1:8765 operator@ubuntu-host
 Change the default retention in `/etc/claudit/service.json`, or select a new
 value in the UI before starting an operation. UI changes persist in
 `/var/lib/claudit/dashboard-state.json` and therefore survive restarts. Existing
-configuration files are preserved during upgrades.
+configuration files are preserved during upgrades. When upgrading a pre-0.3
+installation, the installer:
+
+- saves the previous baseline and wizard profile under
+  `/var/lib/claudit/upgrade-backups/<timestamp>/`;
+- merges the previous baseline values over the new defaults, so new required
+  keys appear without resetting operator policy;
+- migrates the service-account wizard profile to
+  `/var/lib/claudit/.config/claudit/`;
+- copies legacy `/opt/claudit/reports` files into the persistent report store
+  without overwriting files already present.
+
+If a legacy baseline is malformed or incompatible, the upgrade stops before
+restarting the service and leaves its raw backup available for recovery.
 
 Detailed operator runbook: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 Multi-cloud diagnostic matrix: [`docs/CLOUD_PROVIDER_RUNBOOK.md`](docs/CLOUD_PROVIDER_RUNBOOK.md).
@@ -405,24 +434,49 @@ Unattended (scheduled task) with certificate-based app-only auth — no secrets:
 
 The script exits with code **0** when no high-impact condition exists, **2** for
 Critical/High findings (or a requested test failure), and **3** when one or more
-execution errors left controls unevaluated. This keeps confirmed security risk
-separate from incomplete audit coverage in scheduled tasks.
+execution errors or required skipped checks left the audit incomplete. This
+keeps confirmed security risk separate from incomplete coverage in scheduled tasks.
 
 PowerShell Gallery is used only when you explicitly run
 `Install-ClauditPrerequisites.ps1 -ConfirmInstall`. Treat Gallery packages as
-community content: install the minimum modules you need, review names/versions,
+community content: install the minimum modules you need, review the exact versions
+in `config/dependencies.psd1`,
 and avoid storing secrets in module configuration.
+
+### Report contract and interoperability
+
+The canonical JSON contract is `schemas/claudit-report-v2.schema.json`. Schema
+v2 records producer version/commit, runtime, baseline and dependency-lock
+hashes, selected scope, per-service completeness and artifact-manifest name.
+`FindingId` is a stable SHA-256 identity over control, scope and resource key;
+it is distinct from the per-error `DiagnosticId`. `Compare-ClauditResult` reads
+both legacy v1 and v2 reports and compares by stable finding identity.
+
+The OCSF projection uses Compliance Finding/Create for SOC/GRC ingestion. The OSCAL
+projection follows Assessment Results 1.2.1 and references Claudit's local
+assessment-plan URN; certification workflows must bind that URN to an
+organization-owned OSCAL assessment plan and SSP. External CISA/CIS/provider
+mappings remain indicative: the catalog explicitly reports that it is not a
+complete external-framework coverage claim.
 
 ### Using the module directly
 
 ```powershell
 Import-Module ./Claudit.psd1
 Connect-Claudit
-$findings = Get-CaAllFindings
+$services = Get-CaDefaultServices
+$findings = Get-CaAllFindings -Service $services
 $findings | Where-Object Status -eq 'Fail' | Format-Table Service,CheckId,Severity,Title,ControlIds
-$findings | New-CaReport -OutputDirectory ./reports -Format All
+$findings | New-CaReport -OutputDirectory ./reports -Format All `
+    -ExpectedService $services -ExpectedControlLevel Passive
 Disconnect-Claudit
 ```
+
+Pass the expected service set and cumulative control level when using
+`New-CaReport` directly for assurance. This turns a collector that silently
+omits a catalogued control into a blocking `MissingControlResult` instead of a
+partial green report. The top-level audit launchers supply these values
+automatically.
 
 ## The baseline
 
@@ -536,17 +590,22 @@ Start-ClauditDashboard.ps1      local web cockpit for operations/history
 install-ubuntu.sh               Ubuntu systemd installer
 service/                        systemd unit, service runner and default config
 config/baseline.json            editable secure baseline
+config/dependencies.psd1        exact PowerShell module lock
+config/control-catalog.json     versioned mappings, applicability and known gaps
+schemas/claudit-report-v2.schema.json  canonical JSON report schema
 src/Core/Findings.ps1           finding model (+ control auto-tagging)
 src/Core/Catalog.ps1            service registry + provider runtime options
-src/Core/Controls.ps1           CISA/CIS control mapping
+src/Core/Controls.ps1           Versioned control-catalog loader/validator
 src/Core/ExternalCli.ps1        AWS/GCP CLI execution helpers
 src/Core/Connection.ps1         read-only Graph + EXO connect (national clouds)
 src/Core/Graph.ps1              Invoke-CaGraphRequest (paging helper)
 src/Core/Dns.ps1                cross-platform DNS-over-HTTPS lookup
 src/Core/Dnsx.ps1               optional bounded argv-only dnsx adapter
 src/Core/Baseline.ps1           baseline loader
-src/Core/Report.ps1             HTML / JSON / Markdown / CSV reporting
-src/Core/Compare.ps1            drift detection between runs
+src/Core/Report.ps1             core report rendering and artifact orchestration
+src/Core/Provenance.ps1         run scope, hashes and completeness ledger
+src/Core/Interchange.ps1        OCSF 1.8 / OSCAL 1.2.1 projections
+src/Core/Compare.ps1            v1/v2 stable-identity drift detection
 src/Core/Notify.ps1             Teams / Slack webhook notification
 src/Checks/Entra*.ps1           Entra ID checks (incl. EIDSCA)
 src/Checks/Exchange*.ps1        Exchange checks (incl. SPF/DMARC)
@@ -559,19 +618,27 @@ src/Checks/Tailscale.ps1        Tailscale API read-only checks
 src/Checks/Domain.ps1           pre-authorized passive DNS/domain checks
 src/Checks/VPS.ps1              Linux VPS local/SSH read-only host checks
 src/Checks/Inventory.ps1        normalized asset inventory
-tests/Unit.Tests.ps1            framework correctness (runs anywhere)
-tests/Upgrade.Tests.ps1         control mapping / formats / drift tests
-tests/Compliance.Tests.ps1      data-driven tenant compliance assertions
+tests/Report.Tests.ps1          state contract, schema, drift and interchange
+tests/Provider.Tests.ps1        provider denial/pagination/policy regressions
+tests/Domain.Tests.ps1          offline DNS analyzers and resolver consensus
+tests/Dashboard.Tests.ps1       cockpit asset, path and argv hardening
 ```
 
 ## Adding a check
 
-Add a `Test-Ca<Service><Name>` function that wraps its body in `Invoke-CaCheck`
-and returns `New-CaFinding`. Drop it in any file under `src/Checks/` — the glob
-loader and prefix auto-discovery pick it up, no registration needed. Add its
-control IDs to `src/Core/Controls.ps1` to surface governance coverage.
+Add a `Test-Ca<Service><Name>` function that wraps its body in `Invoke-CaCheck`.
+For provider policy checks, keep collection separate from a pure analyzer,
+return `New-CaCheckAssessment`, then pipe it to `ConvertTo-CaFinding`. This makes
+Pass, Fail, NotApplicable and provider Error states fixture-testable without
+credentials. See `docs/CHECK_CONTRACT.md` and the AWS VPC Flow Logs reference
+implementation. Advisory checks may still return `New-CaFinding` directly.
 
-## Scope of 0.2
+Drop the check in any file under `src/Checks/` — the glob loader and prefix
+auto-discovery pick it up, no registration needed. Add its control IDs to
+`config/control-catalog.json` and assign it in `config/check-metadata.json`;
+both catalogs are validated when the module loads.
+
+## Scope of 0.3
 
 Tenant-level controls are covered via Graph and Exchange Online. Deep per-site
 SharePoint analysis (per-site anonymous links, broken inheritance) needs
@@ -584,5 +651,5 @@ a multi-user service: do not expose it through port forwarding or a reverse prox
 
 ## License
 
-MIT. Inspired by the FOSS PowerShell community and the Maester project. Verify
+MIT; see `LICENSE`. Inspired by the FOSS PowerShell community and the Maester project. Verify
 findings against your own policy before acting on them.

@@ -24,13 +24,29 @@ function Get-CaVpsBaseline {
     }
 }
 
+function Assert-CaVpsSshTarget {
+    param([Parameter(Mandatory)][string]$Target)
+
+    if ($Target.StartsWith('-', [System.StringComparison]::Ordinal) -or $Target -match '[\x00-\x20\x7f]') {
+        throw "Unsafe SSH target '$Target': options, whitespace and control characters are not allowed."
+    }
+    $user = '(?:[A-Za-z0-9._-]+@)?'
+    $dnsOrIpv4 = '(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)'
+    $ipv6 = '(?:\[[0-9A-Fa-f:]+\]|[0-9A-Fa-f]*:[0-9A-Fa-f:]+)'
+    if ($Target -notmatch "^$user(?:$dnsOrIpv4|$ipv6)$") {
+        throw "Unsafe SSH target '$Target': expected [user@]host or an IPv4/IPv6 address."
+    }
+}
+
 function Get-CaVpsTarget {
     $opt = Get-CaProviderOption -Provider VPS
     if ([string]::IsNullOrWhiteSpace($opt.Target)) { return '' }
-    if (-not [string]::IsNullOrWhiteSpace($opt.SshUser) -and $opt.Target -notmatch '@') {
-        return "$($opt.SshUser)@$($opt.Target)"
+    $target = [string]$opt.Target
+    if (-not [string]::IsNullOrWhiteSpace($opt.SshUser) -and $target -notmatch '@') {
+        $target = "$($opt.SshUser)@$target"
     }
-    return [string]$opt.Target
+    Assert-CaVpsSshTarget -Target $target
+    return $target
 }
 
 function Get-CaVpsLabel {
@@ -59,6 +75,7 @@ function Invoke-CaVpsCommand {
         $args.Add('-p')
         $args.Add([string][int]$opt.SshPort)
     }
+    $args.Add('--')
     $args.Add($target)
 
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Script)

@@ -42,12 +42,14 @@ function Invoke-CaAwsJson {
     Invoke-CaExternalJson -Command 'aws' -Arguments @($args) -AllowFailure:$AllowFailure
 }
 
-$script:CaAwsIdentityCache = $null
+$script:CaAwsIdentityCache = @{}
 
 function Get-CaAwsCallerIdentity {
-    if ($script:CaAwsIdentityCache) { return $script:CaAwsIdentityCache }
-    $script:CaAwsIdentityCache = Invoke-CaAwsJson -Arguments @('sts', 'get-caller-identity')
-    return $script:CaAwsIdentityCache
+    $cacheKey = (Get-CaAwsBaseArgs) -join "`u{001f}"
+    if ($script:CaAwsIdentityCache.ContainsKey($cacheKey)) { return $script:CaAwsIdentityCache[$cacheKey] }
+    $identity = Invoke-CaAwsJson -Arguments @('sts', 'get-caller-identity')
+    $script:CaAwsIdentityCache[$cacheKey] = $identity
+    return $identity
 }
 
 function Get-CaAwsAuditRegions {
@@ -87,6 +89,108 @@ function Test-CaAwsRootMfa {
                 -Reference 'https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user.html'
         }
     }
+}
+
+function Get-CaAwsVpcFlowLogSnapshot {
+    [CmdletBinding()]
+    param()
+
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $queriedVpcs = 0
+    $regions = @(Get-CaAwsAuditRegions)
+
+    foreach ($region in $regions) {
+        $vpcsDoc = Invoke-CaAwsJson -Arguments @('ec2', 'describe-vpcs') -Region $region -AllowFailure
+        if (-not $vpcsDoc.Success) { $errors.Add("${region}/vpcs: $($vpcsDoc.Text)"); continue }
+        if ($null -eq $vpcsDoc.Json -or $vpcsDoc.Json.PSObject.Properties.Name -notcontains 'Vpcs') {
+            $errors.Add("${region}/vpcs: invalid data returned by describe-vpcs")
+            continue
+        }
+
+        $vpcs = @($vpcsDoc.Json.Vpcs | Where-Object { $_ })
+        $queriedVpcs += $vpcs.Count
+        if ($vpcs.Count -eq 0) { continue }
+        $ids = @($vpcs | ForEach-Object { [string]$_.VpcId } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($ids.Count -ne $vpcs.Count) {
+            $errors.Add("${region}/vpcs: invalid data contains a VPC without VpcId")
+            continue
+        }
+
+        $filter = 'Name=resource-id,Values=' + ($ids -join ',')
+        $logsDoc = Invoke-CaAwsJson -Arguments @('ec2', 'describe-flow-logs', '--filter', $filter) -Region $region -AllowFailure
+        if (-not $logsDoc.Success) { $errors.Add("${region}/flow-logs: $($logsDoc.Text)"); continue }
+        if ($null -eq $logsDoc.Json -or $logsDoc.Json.PSObject.Properties.Name -notcontains 'FlowLogs') {
+            $errors.Add("${region}/flow-logs: invalid data returned by describe-flow-logs")
+            continue
+        }
+
+        $logged = @($logsDoc.Json.FlowLogs | ForEach-Object { [string]$_.ResourceId } | Where-Object { $_ } | Sort-Object -Unique)
+        foreach ($vpcId in $ids) {
+            if ($logged -notcontains $vpcId) { $missing.Add("$region/$vpcId") }
+        }
+    }
+
+    [pscustomobject]@{
+        Regions      = @($regions)
+        QueriedVpcs  = $queriedVpcs
+        Missing      = @($missing | Sort-Object -Unique)
+        Errors       = @($errors)
+    }
+}
+
+function Test-CaAwsVpcFlowLogSnapshot {
+    [CmdletBinding()]
+    param([AllowNull()]$Snapshot)
+
+    $required = @('Regions', 'QueriedVpcs', 'Missing', 'Errors')
+    $missingFields = @(if ($null -eq $Snapshot) { $required } else { $required | Where-Object { $_ -notin $Snapshot.PSObject.Properties.Name } })
+    if ($missingFields.Count -gt 0) {
+        return New-CaCheckAssessment -Status Error -Severity Medium -FailureCategory Data `
+            -FailureCode 'AwsVpcFlowLogSnapshotInvalid' `
+            -Detail "Invalid VPC Flow Logs snapshot; missing fields: $($missingFields -join ', ')." -Evidence $Snapshot
+    }
+
+    $queriedVpcs = 0
+    if (-not [int]::TryParse([string]$Snapshot.QueriedVpcs, [ref]$queriedVpcs) -or $queriedVpcs -lt 0) {
+        return New-CaCheckAssessment -Status Error -Severity Medium -FailureCategory Data `
+            -FailureCode 'AwsVpcFlowLogSnapshotInvalid' `
+            -Detail 'Invalid VPC Flow Logs snapshot; QueriedVpcs must be a non-negative integer.' -Evidence $Snapshot
+    }
+
+    $regions = @(ConvertTo-CaStringList $Snapshot.Regions)
+    $missing = @(ConvertTo-CaStringList $Snapshot.Missing | Sort-Object -Unique)
+    $errors = @(ConvertTo-CaStringList $Snapshot.Errors)
+    $evidence = [pscustomobject]@{ Regions=$regions; QueriedVpcs=$queriedVpcs; Missing=$missing; Errors=$errors }
+
+    if ($regions.Count -eq 0) {
+        return New-CaCheckAssessment -Status Error -Severity Medium -FailureCategory Prerequisite `
+            -FailureCode 'AwsAuditRegionMissing' -Detail 'No AWS audit region was resolved.' -Evidence $evidence
+    }
+    if ($errors.Count -gt 0) {
+        $detail = "VPC Flow Logs could not be completely evaluated: $($errors -join ' | ')"
+        $category = Get-CaFailureCategory -ErrorRecord ([System.InvalidOperationException]::new($detail))
+        return New-CaCheckAssessment -Status Error -Severity Medium -FailureCategory $category `
+            -FailureCode 'AwsVpcFlowLogsCollectionFailed' -Detail $detail -Evidence $evidence
+    }
+    if ($missing.Count -gt $queriedVpcs) {
+        return New-CaCheckAssessment -Status Error -Severity Medium -FailureCategory Data `
+            -FailureCode 'AwsVpcFlowLogSnapshotInvalid' `
+            -Detail 'Invalid VPC Flow Logs snapshot; missing VPC count exceeds queried VPC count.' -Evidence $evidence
+    }
+    if ($queriedVpcs -eq 0) {
+        return New-CaCheckAssessment -Status NotApplicable `
+            -Detail "No VPC exists in the $($regions.Count) successfully queried audit region(s)." -Evidence $evidence
+    }
+    if ($missing.Count -eq 0) {
+        return New-CaCheckAssessment -Status Pass `
+            -Detail "All $queriedVpcs discovered VPC(s) have flow logs." -Evidence $evidence
+    }
+
+    New-CaCheckAssessment -Status Fail -Severity Medium `
+        -Detail "$($missing.Count) VPC(s) without flow logs." -Evidence $evidence `
+        -Recommendation 'Enable VPC Flow Logs to CloudWatch Logs or S3 for every production VPC.' `
+        -Reference 'https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html'
 }
 
 function Test-CaAwsPasswordPolicy {
@@ -165,17 +269,31 @@ function Test-CaAwsGuardDuty {
         foreach ($region in $regions) {
             $r = Invoke-CaAwsJson -Arguments @('guardduty', 'list-detectors') -Region $region -AllowFailure
             if (-not $r.Success) { $errors.Add("${region}: $($r.Text)"); continue }
-            if (@($r.Json.DetectorIds).Count -eq 0) { $missing.Add($region) }
+            $detectorIds = @($r.Json.DetectorIds | Where-Object { $_ })
+            if ($detectorIds.Count -eq 0) { $missing.Add($region); continue }
+
+            $enabled = $false
+            foreach ($detectorId in $detectorIds) {
+                $detector = Invoke-CaAwsJson -Arguments @('guardduty', 'get-detector', '--detector-id', [string]$detectorId) -Region $region -AllowFailure
+                if (-not $detector.Success) {
+                    $errors.Add("${region}/${detectorId}: $($detector.Text)")
+                    continue
+                }
+                if ([string]$detector.Json.Status -eq 'ENABLED') { $enabled = $true }
+            }
+            if (-not $enabled) { $missing.Add($region) }
         }
 
-        if ($missing.Count -eq 0 -and $errors.Count -eq 0) {
+        if ($errors.Count -gt 0) {
+            throw "GuardDuty could not be completely evaluated: $($errors -join ' | ')"
+        }
+        if ($missing.Count -eq 0) {
             New-CaFinding -Service AWS -CheckId 'AWS-005' -Title 'GuardDuty detectors enabled in audit regions' -Status Pass `
                 -Detail "GuardDuty enabled in $($regions.Count) region(s)." -Evidence $regions
         }
         else {
-            $status = if ($missing.Count -gt 0) { 'Fail' } else { 'Warning' }
-            New-CaFinding -Service AWS -CheckId 'AWS-005' -Title 'GuardDuty detectors enabled in audit regions' -Status $status -Severity High `
-                -Detail "Missing: $($missing -join ', '); errors: $($errors.Count)." -Evidence @{ Missing = $missing; Errors = $errors } `
+            New-CaFinding -Service AWS -CheckId 'AWS-005' -Title 'GuardDuty detectors enabled in audit regions' -Status Fail -Severity High `
+                -Detail "No enabled GuardDuty detector in: $($missing -join ', ')." -Evidence $missing `
                 -Recommendation 'Enable GuardDuty in every active region and delegate administration through AWS Organizations where possible.' `
                 -Reference 'https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_settingup.html'
         }
@@ -209,9 +327,7 @@ function Test-CaAwsS3AccountPublicAccessBlock {
         $accountId = (Get-CaAwsCallerIdentity).Account
         $r = Invoke-CaAwsJson -Arguments @('s3control', 'get-public-access-block', '--account-id', $accountId) -AllowFailure
         if (-not $r.Success) {
-            return New-CaFinding -Service AWS -CheckId 'AWS-007' -Title 'S3 account-level public access block enabled' -Status Warning -Severity Medium `
-                -Detail "Could not read S3 account public access block: $($r.Text)" `
-                -Recommendation 'Grant read access to s3control:GetPublicAccessBlock or verify the setting manually.'
+            throw "Could not read S3 account public access block: $($r.Text)"
         }
 
         $c = $r.Json.PublicAccessBlockConfiguration
@@ -271,7 +387,11 @@ function Test-CaAwsEbsDefaultEncryption {
             if (-not [bool]$r.Json.EbsEncryptionByDefault) { $missing.Add($region) }
         }
 
-        if ($missing.Count -eq 0 -and $errors.Count -eq 0) {
+        if ($errors.Count -gt 0) {
+            throw "EBS encryption could not be completely evaluated: $($errors -join ' | ')"
+        }
+
+        if ($missing.Count -eq 0) {
             New-CaFinding -Service AWS -CheckId 'AWS-009' -Title 'EBS encryption by default enabled in audit regions' -Status Pass `
                 -Detail "EBS default encryption enabled in $($regions.Count) region(s)." -Evidence $regions
         }
@@ -288,11 +408,20 @@ function Test-CaAwsConfigRecorders {
     Invoke-CaCheck -Service AWS -CheckId 'AWS-010' -Title 'AWS Config recorders active in audit regions' -Body {
         $regions = @(Get-CaAwsAuditRegions)
         $missing = [System.Collections.Generic.List[string]]::new()
+        $errors = [System.Collections.Generic.List[string]]::new()
         foreach ($region in $regions) {
             $r = Invoke-CaAwsJson -Arguments @('configservice', 'describe-configuration-recorder-status') -Region $region -AllowFailure
-            if (-not $r.Success -or @($r.Json.ConfigurationRecordersStatus | Where-Object { $_.Recording }).Count -eq 0) {
+            if (-not $r.Success) {
+                $errors.Add("${region}: $($r.Text)")
+                continue
+            }
+            if (@($r.Json.ConfigurationRecordersStatus | Where-Object { $_.Recording }).Count -eq 0) {
                 $missing.Add($region)
             }
+        }
+
+        if ($errors.Count -gt 0) {
+            throw "AWS Config could not be completely evaluated: $($errors -join ' | ')"
         }
 
         if ($missing.Count -eq 0) {
@@ -312,34 +441,11 @@ function Test-CaAwsVpcFlowLogs {
     Invoke-CaCheck -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions' -Body {
         $bl = Get-CaBaseline
         if ($bl.AWS.PSObject.Properties.Name -contains 'RequireVpcFlowLogs' -and -not [bool]$bl.AWS.RequireVpcFlowLogs) {
-            return New-CaFinding -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions' -Status Info -Detail 'Baseline does not require this control.'
+            $assessment = New-CaCheckAssessment -Status NotApplicable -Detail 'Baseline does not require this control.'
+            return $assessment | ConvertTo-CaFinding -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions'
         }
 
-        $missing = [System.Collections.Generic.List[string]]::new()
-        foreach ($region in @(Get-CaAwsAuditRegions)) {
-            $vpcsDoc = Invoke-CaAwsJson -Arguments @('ec2', 'describe-vpcs') -Region $region -AllowFailure
-            if (-not $vpcsDoc.Success) { continue }
-            $vpcs = @($vpcsDoc.Json.Vpcs | Where-Object { $_ })
-            if ($vpcs.Count -eq 0) { continue }
-            $ids = @($vpcs | ForEach-Object { $_.VpcId })
-            $filter = 'Name=resource-id,Values=' + ($ids -join ',')
-            $logsDoc = Invoke-CaAwsJson -Arguments @('ec2', 'describe-flow-logs', '--filter', $filter) -Region $region -AllowFailure
-            $logged = @()
-            if ($logsDoc.Success) { $logged = @($logsDoc.Json.FlowLogs | ForEach-Object { $_.ResourceId } | Sort-Object -Unique) }
-            foreach ($vpc in $vpcs) {
-                if ($logged -notcontains $vpc.VpcId) { $missing.Add("$region/$($vpc.VpcId)") }
-            }
-        }
-
-        if ($missing.Count -eq 0) {
-            New-CaFinding -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions' -Status Pass `
-                -Detail 'All discovered VPCs have flow logs.' -Evidence $missing
-        }
-        else {
-            New-CaFinding -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions' -Status Fail -Severity Medium `
-                -Detail "$($missing.Count) VPC(s) without flow logs." -Evidence $missing `
-                -Recommendation 'Enable VPC Flow Logs to CloudWatch Logs or S3 for every production VPC.' `
-                -Reference 'https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html'
-        }
+        $assessment = Test-CaAwsVpcFlowLogSnapshot -Snapshot (Get-CaAwsVpcFlowLogSnapshot)
+        $assessment | ConvertTo-CaFinding -Service AWS -CheckId 'AWS-011' -Title 'VPC flow logs enabled for all VPCs in audit regions'
     }
 }

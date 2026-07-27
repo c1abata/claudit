@@ -56,10 +56,12 @@ function Get-CaSummary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object[]]$Findings)
 
-    $byStatus = $Findings | Group-Object Status -AsHashTable -AsString
+    $activeFindings = @($Findings | Where-Object { -not $_.IsSuppressed })
+    $suppressed = @($Findings | Where-Object IsSuppressed).Count
+    $byStatus = $activeFindings | Group-Object Status -AsHashTable -AsString
     $get = { param($k) if ($byStatus -and $byStatus.ContainsKey($k)) { @($byStatus[$k]).Count } else { 0 } }
 
-    $fails = $Findings | Where-Object { $_.Status -eq 'Fail' }
+    $fails = $activeFindings | Where-Object { $_.Status -eq 'Fail' }
     $bySev = $fails | Group-Object Severity -AsHashTable -AsString
     $getSev = { param($k) if ($bySev -and $bySev.ContainsKey($k)) { @($bySev[$k]).Count } else { 0 } }
 
@@ -70,12 +72,21 @@ function Get-CaSummary {
     $info = & $get 'Info'
     $errorCount = & $get 'Error'
     $skipped = & $get 'Skipped'
+    $notApplicable = & $get 'NotApplicable'
     $investigate = & $get 'Investigate'
-    $evaluated = $total - $errorCount - $skipped
+    $applicable = $total - $notApplicable
+    $evaluated = $applicable - $errorCount - $skipped
     $problems = $fail + $warning + $investigate
-    $coverage = if ($total -gt 0) { [math]::Round(($evaluated / $total) * 100, 1) } else { 0 }
+    $coverage = if ($applicable -gt 0) {
+        [math]::Round(($evaluated / $applicable) * 100, 1)
+    }
+    elseif ($total -gt 0) { 100 }
+    else { 0 }
     $outcome = if ($errorCount -gt 0) {
         'ExecutionError'
+    }
+    elseif ($skipped -gt 0) {
+        'Incomplete'
     }
     elseif ($fail -gt 0) {
         'IssuesFound'
@@ -83,24 +94,36 @@ function Get-CaSummary {
     elseif (($warning + $investigate) -gt 0) {
         'Attention'
     }
-    elseif ($total -gt 0) {
+    elseif ($suppressed -gt 0) {
+        'Attention'
+    }
+    elseif ($applicable -gt 0) {
         'Pass'
+    }
+    elseif ($notApplicable -gt 0) {
+        'NotApplicable'
     }
     else {
         'Empty'
     }
     $serviceSummary = @($Findings | Group-Object Service | ForEach-Object {
         $items = @($_.Group)
-        $serviceFail = @($items | Where-Object Status -eq 'Fail').Count
-        $serviceWarning = @($items | Where-Object { $_.Status -in @('Warning', 'Investigate') }).Count
-        $serviceError = @($items | Where-Object Status -eq 'Error').Count
+        $activeItems = @($items | Where-Object { -not $_.IsSuppressed })
+        $serviceSuppressed = @($items | Where-Object IsSuppressed).Count
+        $serviceFail = @($activeItems | Where-Object Status -eq 'Fail').Count
+        $serviceWarning = @($activeItems | Where-Object { $_.Status -in @('Warning', 'Investigate') }).Count
+        $serviceError = @($activeItems | Where-Object Status -eq 'Error').Count
+        $serviceSkipped = @($activeItems | Where-Object Status -eq 'Skipped').Count
+        $serviceNotApplicable = @($activeItems | Where-Object Status -eq 'NotApplicable').Count
         [pscustomobject]@{
             Service      = $_.Name
-            Outcome      = if ($serviceError) { 'ExecutionError' } elseif ($serviceFail) { 'IssuesFound' } elseif ($serviceWarning) { 'Attention' } else { 'Pass' }
+            Outcome      = if ($serviceError) { 'ExecutionError' } elseif ($serviceSkipped) { 'Incomplete' } elseif ($serviceFail) { 'IssuesFound' } elseif ($serviceWarning -or $serviceSuppressed) { 'Attention' } elseif ($items.Count -eq $serviceNotApplicable) { 'NotApplicable' } else { 'Pass' }
             Total        = $items.Count
-            Pass         = @($items | Where-Object Status -eq 'Pass').Count
+            Pass         = @($activeItems | Where-Object Status -eq 'Pass').Count
             Problems     = $serviceFail + $serviceWarning
-            NotEvaluated = @($items | Where-Object { $_.Status -in @('Error', 'Skipped') }).Count
+            Suppressed   = $serviceSuppressed
+            NotEvaluated = $serviceError + $serviceSkipped
+            NotApplicable = $serviceNotApplicable
             Errors       = $serviceError
         }
     } | Sort-Object Service)
@@ -108,10 +131,12 @@ function Get-CaSummary {
     [pscustomobject]@{
         Outcome      = $outcome
         Total        = $Findings.Count
+        Applicable   = $applicable
         Evaluated    = $evaluated
         NotEvaluated = $errorCount + $skipped
         CoveragePercent = $coverage
         ProblemsDetected = $problems
+        Suppressed   = $suppressed
         BlockingErrors = $errorCount
         Pass         = $pass
         Fail         = $fail
@@ -119,12 +144,13 @@ function Get-CaSummary {
         Info         = $info
         Error        = $errorCount
         Skipped      = $skipped
+        NotApplicable = $notApplicable
         Investigate  = $investigate
         Critical     = & $getSev 'Critical'
         High         = & $getSev 'High'
         Medium       = & $getSev 'Medium'
         Low          = & $getSev 'Low'
-        RecommendedExitCode = if ($errorCount -gt 0) { 3 } elseif (((& $getSev 'Critical') + (& $getSev 'High')) -gt 0) { 2 } else { 0 }
+        RecommendedExitCode = if (($errorCount + $skipped) -gt 0) { 3 } elseif (((& $getSev 'Critical') + (& $getSev 'High')) -gt 0) { 2 } else { 0 }
         Services     = $serviceSummary
         GeneratedUtc = [DateTime]::UtcNow.ToString('o')
     }
@@ -161,6 +187,9 @@ function Write-CaUtf8FileAtomic {
     try {
         [System.IO.File]::WriteAllText($temporaryPath, $Content, [System.Text.UTF8Encoding]::new($false))
         [System.IO.File]::Move($temporaryPath, $Path, $false)
+        if (-not $IsWindows) {
+            [System.IO.File]::SetUnixFileMode($Path, [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite)
+        }
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) {
@@ -175,13 +204,49 @@ function New-CaReportStem {
     return "claudit-$stamp-$suffix"
 }
 
+function Add-CaMissingControlFindings {
+    param(
+        [Parameter(Mandatory)][object[]]$Findings,
+        [string[]]$ExpectedService = @(),
+        [AllowEmptyString()][string]$ExpectedControlLevel = ''
+    )
+
+    $result = [System.Collections.Generic.List[object]]::new()
+    foreach ($finding in $Findings) { $result.Add($finding) }
+    if ($ExpectedService.Count -eq 0) { return @($result) }
+    if ($ExpectedControlLevel -notin @('Formal', 'Passive', 'Active')) {
+        throw 'ExpectedControlLevel must be Formal, Passive or Active when ExpectedService is supplied.'
+    }
+
+    $completeness = @(Get-CaReportCompleteness -Findings $Findings -ExpectedService $ExpectedService -ExpectedControlLevel $ExpectedControlLevel)
+    foreach ($service in $completeness) {
+        foreach ($checkId in @($service.MissingControls)) {
+            $result.Add((New-CaFinding -Service $service.Service -CheckId $checkId `
+                -Title 'Expected control result missing' -ControlLevel $service.ControlLevel `
+                -Status Error -Severity High `
+                -Detail "The selected $($service.Service) $($service.ControlLevel) assessment expected a result for $checkId, but the collector returned none." `
+                -Recommendation 'Treat the run as incomplete. Inspect the collector path and restore one explicit result for every expected control.' `
+                -FailureCategory Internal -FailureCode MissingControlResult `
+                -Evidence ([pscustomobject]@{
+                    Service=$service.Service
+                    ControlLevel=$service.ControlLevel
+                    ExpectedCheckId=$checkId
+                })))
+        }
+    }
+    return @($result)
+}
+
 function New-CaReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline)][object[]]$Findings,
         [string]$OutputDirectory,
-        [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'All')][string]$Format = 'All',
-        [string]$TenantName = 'Cloud tenant'
+        [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'Ocsf', 'Oscal', 'Catalog', 'All')][string]$Format = 'All',
+        [string]$TenantName = 'Cloud tenant',
+        [string]$ExceptionPath,
+        [string[]]$ExpectedService = @(),
+        [AllowEmptyString()][string]$ExpectedControlLevel = ''
     )
 
     begin { $all = [System.Collections.Generic.List[object]]::new() }
@@ -195,54 +260,102 @@ function New-CaReport {
         }
         $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
 
+        $compatibleFindings = @($all | ForEach-Object { ConvertTo-CaCompatibleFinding -Finding $_ })
+        $compatibleFindings = @(Add-CaMissingControlFindings -Findings $compatibleFindings -ExpectedService $ExpectedService -ExpectedControlLevel $ExpectedControlLevel)
+        $exceptionResult = Resolve-CaFindingExceptions -Findings $compatibleFindings -Path $ExceptionPath
+        $findingArray = @($exceptionResult.Findings)
+        $exceptionPolicy = $exceptionResult.Policy
         $stem = New-CaReportStem
-        $summary = Get-CaSummary -Findings $all
+        $runId = [guid]::NewGuid()
+        $summary = Get-CaSummary -Findings $findingArray
         $files = @()
         $want = { param($f) $Format -eq 'All' -or $Format -eq $f }
         $safeTenantName = ConvertTo-CaRedactedText -Text $TenantName
-        $problems = @(Get-CaSortedFindings -Findings @($all | Where-Object { $_.Status -in @('Fail', 'Warning', 'Investigate') }))
-        $executionErrors = @(Get-CaSortedFindings -Findings @($all | Where-Object Status -eq 'Error'))
-        $notEvaluated = @(Get-CaSortedFindings -Findings @($all | Where-Object Status -eq 'Skipped'))
+        $problems = @(Get-CaSortedFindings -Findings @($findingArray | Where-Object { -not $_.IsSuppressed -and $_.Status -in @('Fail', 'Warning', 'Investigate') }))
+        $suppressedFindings = @(Get-CaSortedFindings -Findings @($findingArray | Where-Object IsSuppressed))
+        $executionErrors = @(Get-CaSortedFindings -Findings @($findingArray | Where-Object Status -eq 'Error'))
+        $notEvaluated = @(Get-CaSortedFindings -Findings @($findingArray | Where-Object Status -eq 'Skipped'))
+        $artifactManifestName = "$stem.sha256"
+        $catalog = Get-CaControlCatalog
+        $catalogArtifactName = if (& $want 'Catalog') { "$stem.catalog.json" } else { '' }
+        $checkMetadataCatalog = Get-CaCheckMetadataCatalog
+        $checkMetadataArtifactName = if (& $want 'Catalog') { "$stem.checks.json" } else { '' }
+        $checkMetadataCount = @($checkMetadataCatalog.Assignments | ForEach-Object { @($_.CheckIds) }).Count
+        $provenance = Get-CaReportProvenance -Findings $findingArray -Summary $summary -TenantName $safeTenantName -RunId $runId -ArtifactManifest $artifactManifestName `
+            -ExpectedService $ExpectedService -ExpectedControlLevel $ExpectedControlLevel
 
         if (& $want 'Json') {
             $jsonPath = Join-Path $OutputDirectory "$stem.json"
             $json = [pscustomobject]@{
-                SchemaVersion   = '1.0'
+                SchemaVersion   = '2.0'
+                Schema          = 'https://github.com/c1abata/claudit/blob/main/schemas/claudit-report-v2.schema.json'
                 ReportType      = 'ClauditAudit'
+                ReportId        = $runId.ToString('D')
                 Tenant          = $safeTenantName
+                Provenance      = $provenance
+                ControlCatalog  = [pscustomobject]@{
+                    Version=$catalog.CatalogVersion; FullFrameworkCoverage=$catalog.FullFrameworkCoverage
+                    CoverageModel=$catalog.CoverageModel; Artifact=$catalogArtifactName
+                }
+                CheckMetadataCatalog = [pscustomobject]@{
+                    Version=$checkMetadataCatalog.CatalogVersion; Profiles=@($checkMetadataCatalog.Profiles).Count
+                    Checks=$checkMetadataCount; CoverageModel=$checkMetadataCatalog.CoverageModel; Artifact=$checkMetadataArtifactName
+                }
+                ExceptionPolicy = $exceptionPolicy
                 Summary         = $summary
                 Problems        = $problems
+                SuppressedFindings = $suppressedFindings
                 ExecutionErrors = $executionErrors
                 NotEvaluated    = $notEvaluated
-                Findings        = $all
-            } | ConvertTo-Json -Depth 8
+                Findings        = $findingArray
+            } | ConvertTo-Json -Depth 12
             Write-CaUtf8FileAtomic -Path $jsonPath -Content $json
             $files += $jsonPath
         }
         if (& $want 'Html') {
             $htmlPath = Join-Path $OutputDirectory "$stem.html"
-            $html = New-CaHtmlBody -Findings $all -Summary $summary -TenantName $safeTenantName
+            $html = New-CaHtmlBody -Findings $findingArray -Summary $summary -TenantName $safeTenantName -Version $provenance.Producer.Version
             Write-CaUtf8FileAtomic -Path $htmlPath -Content $html
             $files += $htmlPath
         }
         if (& $want 'Markdown') {
             $mdPath = Join-Path $OutputDirectory "$stem.md"
-            $markdown = New-CaMarkdownBody -Findings $all -Summary $summary -TenantName $safeTenantName
+            $markdown = New-CaMarkdownBody -Findings $findingArray -Summary $summary -TenantName $safeTenantName
             Write-CaUtf8FileAtomic -Path $mdPath -Content $markdown
             $files += $mdPath
         }
         if (& $want 'Csv') {
             $csvPath = Join-Path $OutputDirectory "$stem.csv"
-            $csvRows = $all | ForEach-Object {
+            $csvRows = $findingArray | ForEach-Object {
                 [pscustomobject]@{
+                    FindingId     = ConvertTo-CaCsvSafeText -Text $_.FindingId
                     CheckId        = ConvertTo-CaCsvSafeText -Text $_.CheckId
+                    ScopeId        = ConvertTo-CaCsvSafeText -Text $_.ScopeId
+                    ResourceType   = ConvertTo-CaCsvSafeText -Text $_.ResourceType
+                    ResourceId     = ConvertTo-CaCsvSafeText -Text $_.ResourceId
+                    EvidenceHash   = ConvertTo-CaCsvSafeText -Text $_.EvidenceHash
                     ControlLevel   = ConvertTo-CaCsvSafeText -Text $_.ControlLevel
                     Service        = ConvertTo-CaCsvSafeText -Text $_.Service
                     Title          = ConvertTo-CaCsvSafeText -Text $_.Title
                     Status         = ConvertTo-CaCsvSafeText -Text $_.Status
                     Outcome        = ConvertTo-CaCsvSafeText -Text $_.Outcome
                     Severity       = ConvertTo-CaCsvSafeText -Text $_.Severity
+                    MetadataCatalogVersion = ConvertTo-CaCsvSafeText -Text $_.MetadataCatalogVersion
+                    MetadataProfile = ConvertTo-CaCsvSafeText -Text $_.MetadataProfile
+                    MetadataSource = ConvertTo-CaCsvSafeText -Text $_.MetadataSource
+                    DefaultSeverity = ConvertTo-CaCsvSafeText -Text $_.DefaultSeverity
+                    Categories     = ConvertTo-CaCsvSafeText -Text ($_.Categories -join '; ')
+                    Threats        = ConvertTo-CaCsvSafeText -Text ($_.Threats -join '; ')
+                    Risk           = ConvertTo-CaCsvSafeText -Text $_.Risk
+                    DependsOn      = ConvertTo-CaCsvSafeText -Text ($_.DependsOn -join '; ')
+                    RelatedTo      = ConvertTo-CaCsvSafeText -Text ($_.RelatedTo -join '; ')
                     IsBlocking     = [bool]$_.IsBlocking
+                    IsSuppressed   = [bool]$_.IsSuppressed
+                    SuppressionRuleId = ConvertTo-CaCsvSafeText -Text $(if ($_.Suppression) { $_.Suppression.RuleId } else { '' })
+                    SuppressionReason = ConvertTo-CaCsvSafeText -Text $(if ($_.Suppression) { $_.Suppression.Reason } else { '' })
+                    SuppressionOwner = ConvertTo-CaCsvSafeText -Text $(if ($_.Suppression) { $_.Suppression.Owner } else { '' })
+                    SuppressionTicket = ConvertTo-CaCsvSafeText -Text $(if ($_.Suppression) { $_.Suppression.Ticket } else { '' })
+                    SuppressionExpiresUtc = ConvertTo-CaCsvSafeText -Text $(if ($_.Suppression) { $_.Suppression.ExpiresUtc } else { '' })
                     FailureCategory = ConvertTo-CaCsvSafeText -Text $_.FailureCategory
                     FailureCode    = ConvertTo-CaCsvSafeText -Text $_.FailureCode
                     DiagnosticId   = ConvertTo-CaCsvSafeText -Text $_.DiagnosticId
@@ -257,10 +370,40 @@ function New-CaReport {
             Write-CaUtf8FileAtomic -Path $csvPath -Content $csv
             $files += $csvPath
         }
+        if (& $want 'Ocsf') {
+            $ocsfPath = Join-Path $OutputDirectory "$stem.ocsf.jsonl"
+            Write-CaUtf8FileAtomic -Path $ocsfPath -Content (ConvertTo-CaOcsfJsonLines -Findings $findingArray -Provenance $provenance)
+            $files += $ocsfPath
+        }
+        if (& $want 'Oscal') {
+            $oscalPath = Join-Path $OutputDirectory "$stem.oscal-ar.json"
+            $oscal = ConvertTo-CaOscalAssessmentResults -Findings $findingArray -Provenance $provenance -Summary $summary -ControlCatalog $catalog
+            Write-CaUtf8FileAtomic -Path $oscalPath -Content ($oscal | ConvertTo-Json -Depth 15)
+            $files += $oscalPath
+        }
+        if (& $want 'Catalog') {
+            $catalogPath = Join-Path $OutputDirectory "$stem.catalog.json"
+            Write-CaUtf8FileAtomic -Path $catalogPath -Content ($catalog | ConvertTo-Json -Depth 10)
+            $files += $catalogPath
+            $checkMetadataPath = Join-Path $OutputDirectory "$stem.checks.json"
+            Write-CaUtf8FileAtomic -Path $checkMetadataPath -Content ($checkMetadataCatalog | ConvertTo-Json -Depth 10)
+            $files += $checkMetadataPath
+        }
+
+        $artifactManifestPath = Join-Path $OutputDirectory $artifactManifestName
+        Write-CaArtifactManifest -Paths $files -ManifestPath $artifactManifestPath
+        $files += $artifactManifestPath
 
         [pscustomobject]@{
+            SchemaVersion = '2.0'
+            ReportId = $runId.ToString('D')
             Summary = $summary
+            Provenance = $provenance
+            ControlCatalog = $catalog
+            CheckMetadataCatalog = $checkMetadataCatalog
+            ExceptionPolicy = $exceptionPolicy
             Problems = $problems
+            SuppressedFindings = $suppressedFindings
             ExecutionErrors = $executionErrors
             NotEvaluated = $notEvaluated
             OutputDirectory = $OutputDirectory
@@ -272,7 +415,7 @@ function New-CaReport {
 function Get-CaSortedFindings {
     param([object[]]$Findings)
     $sortOrder = @(
-        @{ Expression = { switch ($_.Status) { 'Error' { 5 } 'Fail' { 4 } 'Investigate' { 3 } 'Warning' { 2 } 'Skipped' { 1 } default { 0 } } }; Descending = $true }
+        @{ Expression = { switch ($_.Status) { 'Error' { 6 } 'Fail' { 5 } 'Investigate' { 4 } 'Warning' { 3 } 'Skipped' { 2 } 'NotApplicable' { 1 } default { 0 } } }; Descending = $true }
         @{ Expression = 'SeverityRank'; Descending = $true }
         @{ Expression = 'Service'; Descending = $false }
         @{ Expression = 'CheckId'; Descending = $false }
@@ -295,16 +438,17 @@ function Add-CaMarkdownFindingTable {
 
     $diagnosticHeader = if ($IncludeDiagnostics) { ' | Diagnostic' } else { '' }
     $diagnosticRule = if ($IncludeDiagnostics) { '|------------' } else { '' }
-    [void]$Builder.AppendLine("| ID | Service | Status | Severity | Check | Detail | Recommendation$diagnosticHeader |")
-    [void]$Builder.AppendLine("|----|---------|--------|----------|-------|--------|---------------$diagnosticRule|")
+    [void]$Builder.AppendLine("| ID | Service | Status | Severity | Categories | Check | Detail | Recommendation$diagnosticHeader |")
+    [void]$Builder.AppendLine("|----|---------|--------|----------|------------|-------|--------|---------------$diagnosticRule|")
     foreach ($f in (Get-CaSortedFindings -Findings $Findings)) {
         $cells = @(
             (ConvertTo-CaMarkdownTableCell -Text $f.CheckId)
             (ConvertTo-CaMarkdownTableCell -Text $f.Service)
-            (ConvertTo-CaMarkdownTableCell -Text $f.Status)
+            (ConvertTo-CaMarkdownTableCell -Text $(if ($f.IsSuppressed) { "$($f.Status) (Suppressed)" } else { $f.Status }))
             (ConvertTo-CaMarkdownTableCell -Text $f.Severity)
+            (ConvertTo-CaMarkdownTableCell -Text ($f.Categories -join ', '))
             (ConvertTo-CaMarkdownTableCell -Text $f.Title)
-            (ConvertTo-CaMarkdownTableCell -Text $(if ($f.Status -eq 'Skipped' -and $f.SkippedReason) { $f.SkippedReason } else { $f.Detail }))
+            (ConvertTo-CaMarkdownTableCell -Text $(if ($f.IsSuppressed) { "$($f.Suppression.Reason) [$($f.Suppression.RuleId); $($f.Suppression.Ticket); expires $($f.Suppression.ExpiresUtc)]" } elseif ($f.Status -eq 'Skipped' -and $f.SkippedReason) { $f.SkippedReason } else { $f.Detail }))
             (ConvertTo-CaMarkdownTableCell -Text $f.Recommendation)
         )
         if ($IncludeDiagnostics) {
@@ -329,16 +473,20 @@ function New-CaMarkdownBody {
     [void]$sb.AppendLine("**Generated:** $($Summary.GeneratedUtc) UTC  ")
     [void]$sb.AppendLine("**Mode:** read-only  ")
     [void]$sb.AppendLine("**Overall outcome:** $($Summary.Outcome)  ")
-    [void]$sb.AppendLine("**Evaluation coverage:** $($Summary.CoveragePercent)% ($($Summary.Evaluated)/$($Summary.Total))")
+    [void]$sb.AppendLine("**Evaluation coverage:** $($Summary.CoveragePercent)% ($($Summary.Evaluated)/$($Summary.Applicable))")
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("| Problems | Execution errors | Not evaluated | Pass | Critical | High |")
-    [void]$sb.AppendLine("|---------:|-----------------:|--------------:|-----:|---------:|-----:|")
-    [void]$sb.AppendLine("| $($Summary.ProblemsDetected) | $($Summary.BlockingErrors) | $($Summary.NotEvaluated) | $($Summary.Pass) | $($Summary.Critical) | $($Summary.High) |")
+    [void]$sb.AppendLine("| Problems | Suppressed | Execution errors | Not evaluated | Pass | Critical | High |")
+    [void]$sb.AppendLine("|---------:|-----------:|-----------------:|--------------:|-----:|---------:|-----:|")
+    [void]$sb.AppendLine("| $($Summary.ProblemsDetected) | $($Summary.Suppressed) | $($Summary.BlockingErrors) | $($Summary.NotEvaluated) | $($Summary.Pass) | $($Summary.Critical) | $($Summary.High) |")
     [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('## Problems detected')
     [void]$sb.AppendLine('')
-    Add-CaMarkdownFindingTable -Builder $sb -Findings @($Findings | Where-Object { $_.Status -in @('Fail', 'Warning', 'Investigate') })
+    Add-CaMarkdownFindingTable -Builder $sb -Findings @($Findings | Where-Object { -not $_.IsSuppressed -and $_.Status -in @('Fail', 'Warning', 'Investigate') })
+
+    [void]$sb.AppendLine('## Suppressed findings')
+    [void]$sb.AppendLine('')
+    Add-CaMarkdownFindingTable -Builder $sb -Findings @($Findings | Where-Object IsSuppressed)
 
     [void]$sb.AppendLine('## Execution errors blocking evaluation')
     [void]$sb.AppendLine('')
@@ -350,28 +498,29 @@ function New-CaMarkdownBody {
 
     [void]$sb.AppendLine('## Service coverage')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| Service | Outcome | Total | Pass | Problems | Not evaluated | Errors |')
-    [void]$sb.AppendLine('|---------|---------|------:|-----:|---------:|--------------:|-------:|')
+    [void]$sb.AppendLine('| Service | Outcome | Total | Pass | Problems | Suppressed | Not evaluated | Errors |')
+    [void]$sb.AppendLine('|---------|---------|------:|-----:|---------:|-----------:|--------------:|-------:|')
     foreach ($service in @($Summary.Services)) {
-        [void]$sb.AppendLine("| $(ConvertTo-CaMarkdownTableCell $service.Service) | $(ConvertTo-CaMarkdownTableCell $service.Outcome) | $($service.Total) | $($service.Pass) | $($service.Problems) | $($service.NotEvaluated) | $($service.Errors) |")
+        [void]$sb.AppendLine("| $(ConvertTo-CaMarkdownTableCell $service.Service) | $(ConvertTo-CaMarkdownTableCell $service.Outcome) | $($service.Total) | $($service.Pass) | $($service.Problems) | $($service.Suppressed) | $($service.NotEvaluated) | $($service.Errors) |")
     }
     [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('## Complete results')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("| ID | Level | Service | Status | Severity | Check | Controls | Detail | Recommendation |")
-    [void]$sb.AppendLine("|----|-------|---------|--------|----------|-------|----------|--------|----------------|")
+    [void]$sb.AppendLine("| ID | Level | Service | Status | Severity | Categories | Check | Controls | Detail | Recommendation |")
+    [void]$sb.AppendLine("|----|-------|---------|--------|----------|------------|-------|----------|--------|----------------|")
     foreach ($f in (Get-CaSortedFindings -Findings $Findings)) {
         $id = ConvertTo-CaMarkdownTableCell -Text $f.CheckId
         $level = ConvertTo-CaMarkdownTableCell -Text $f.ControlLevel
         $svc = ConvertTo-CaMarkdownTableCell -Text $f.Service
-        $status = ConvertTo-CaMarkdownTableCell -Text $f.Status
+        $status = ConvertTo-CaMarkdownTableCell -Text $(if ($f.IsSuppressed) { "$($f.Status) (Suppressed)" } else { $f.Status })
         $severity = ConvertTo-CaMarkdownTableCell -Text $f.Severity
+        $categories = ConvertTo-CaMarkdownTableCell -Text ($f.Categories -join ', ')
         $title = ConvertTo-CaMarkdownTableCell -Text $f.Title
         $controls = ConvertTo-CaMarkdownTableCell -Text ($f.ControlIds -join ', ')
-        $detail = ConvertTo-CaMarkdownTableCell -Text $(if ($f.Status -eq 'Skipped' -and $f.SkippedReason) { $f.SkippedReason } else { $f.Detail })
+        $detail = ConvertTo-CaMarkdownTableCell -Text $(if ($f.IsSuppressed) { "$($f.Detail) [suppressed by $($f.Suppression.RuleId); $($f.Suppression.Ticket); expires $($f.Suppression.ExpiresUtc)]" } elseif ($f.Status -eq 'Skipped' -and $f.SkippedReason) { $f.SkippedReason } else { $f.Detail })
         $recommendation = ConvertTo-CaMarkdownTableCell -Text $f.Recommendation
-        [void]$sb.AppendLine("| $id | $level | $svc | $status | $severity | $title | $controls | $detail | $recommendation |")
+        [void]$sb.AppendLine("| $id | $level | $svc | $status | $severity | $categories | $title | $controls | $detail | $recommendation |")
     }
     $sb.ToString()
 }
@@ -380,14 +529,16 @@ function New-CaHtmlBody {
     param(
         [Parameter(Mandatory)][object[]]$Findings,
         [Parameter(Mandatory)][object]$Summary,
-        [string]$TenantName
+        [string]$TenantName,
+        [Parameter(Mandatory)][string]$Version
     )
 
-    $statusColor = @{ Pass = '#1a7f37'; Fail = '#cf222e'; Warning = '#bf8700'; Info = '#0969da'; Error = '#6e7781'; Skipped = '#8b949e'; Investigate = '#8250df' }
+    $statusColor = @{ Pass = '#1a7f37'; Fail = '#cf222e'; Warning = '#bf8700'; Info = '#0969da'; Error = '#6e7781'; Skipped = '#8b949e'; NotApplicable = '#57606a'; Investigate = '#8250df' }
     $sevColor    = @{ Critical = '#cf222e'; High = '#d1242f'; Medium = '#bf8700'; Low = '#0969da'; Info = '#6e7781' }
 
     $rowList = [System.Collections.Generic.List[string]]::new()
     $problemRowList = [System.Collections.Generic.List[string]]::new()
+    $suppressedRowList = [System.Collections.Generic.List[string]]::new()
     $errorRowList = [System.Collections.Generic.List[string]]::new()
     $skippedRowList = [System.Collections.Generic.List[string]]::new()
     foreach ($f in (Get-CaSortedFindings -Findings $Findings)) {
@@ -402,39 +553,46 @@ function New-CaHtmlBody {
         $level = ConvertTo-CaHtmlEncoded $f.ControlLevel
         $svc   = ConvertTo-CaHtmlEncoded $f.Service
         $title = ConvertTo-CaHtmlEncoded $f.Title
-        $stat  = ConvertTo-CaHtmlEncoded $f.Status
+        $stat  = ConvertTo-CaHtmlEncoded $(if ($f.IsSuppressed) { "$($f.Status) (Suppressed)" } else { $f.Status })
         $sev   = ConvertTo-CaHtmlEncoded $f.Severity
+        $categories = ConvertTo-CaHtmlEncoded (($f.Categories) -join ', ')
         $detailText = if ($f.Status -eq 'Skipped' -and $f.SkippedReason) { $f.SkippedReason } else { $f.Detail }
         if ($f.Status -eq 'Error') {
             $detailText = "$detailText [diagnostic $($f.DiagnosticId); $($f.FailureCategory); $($f.FailureCode)]"
+        }
+        if ($f.IsSuppressed) {
+            $detailText = "$detailText [suppressed by $($f.Suppression.RuleId); $($f.Suppression.Ticket); expires $($f.Suppression.ExpiresUtc)]"
+            $sc = '#6e7781'
         }
         $det   = ConvertTo-CaHtmlEncoded $detailText
         $ctrl  = ConvertTo-CaHtmlEncoded (($f.ControlIds) -join ', ')
         $row = "<tr><td><code>$id</code></td><td>$level</td><td>$svc</td><td>$title</td>" +
                "<td><span class=`"pill`" style=`"background:$sc`">$stat</span></td>" +
-               "<td><span class=`"pill`" style=`"background:$vc`">$sev</span></td>" +
+               "<td><span class=`"pill`" style=`"background:$vc`">$sev</span></td><td>$categories</td>" +
                "<td class=`"ctrl`">$ctrl</td><td>$det</td><td>$recCell</td></tr>"
         $rowList.Add($row)
-        if ($f.Status -in @('Fail', 'Warning', 'Investigate')) { $problemRowList.Add($row) }
+        if (-not $f.IsSuppressed -and $f.Status -in @('Fail', 'Warning', 'Investigate')) { $problemRowList.Add($row) }
+        if ($f.IsSuppressed) { $suppressedRowList.Add($row) }
         if ($f.Status -eq 'Error') { $errorRowList.Add($row) }
         if ($f.Status -eq 'Skipped') { $skippedRowList.Add($row) }
     }
     $rowsHtml = $rowList -join "`n"
-    $problemRowsHtml = if ($problemRowList.Count) { $problemRowList -join "`n" } else { '<tr><td colspan="9" class="empty">No audit problems detected.</td></tr>' }
-    $errorRowsHtml = if ($errorRowList.Count) { $errorRowList -join "`n" } else { '<tr><td colspan="9" class="empty">No execution errors blocked evaluation.</td></tr>' }
-    $skippedRowsHtml = if ($skippedRowList.Count) { $skippedRowList -join "`n" } else { '<tr><td colspan="9" class="empty">No controls were intentionally skipped.</td></tr>' }
+    $problemRowsHtml = if ($problemRowList.Count) { $problemRowList -join "`n" } else { '<tr><td colspan="10" class="empty">No audit problems detected.</td></tr>' }
+    $suppressedRowsHtml = if ($suppressedRowList.Count) { $suppressedRowList -join "`n" } else { '<tr><td colspan="10" class="empty">No findings were suppressed.</td></tr>' }
+    $errorRowsHtml = if ($errorRowList.Count) { $errorRowList -join "`n" } else { '<tr><td colspan="10" class="empty">No execution errors blocked evaluation.</td></tr>' }
+    $skippedRowsHtml = if ($skippedRowList.Count) { $skippedRowList -join "`n" } else { '<tr><td colspan="10" class="empty">No controls were intentionally skipped.</td></tr>' }
 
     $serviceRows = @($Summary.Services | ForEach-Object {
         $service = ConvertTo-CaHtmlEncoded $_.Service
         $outcome = ConvertTo-CaHtmlEncoded $_.Outcome
-        "<tr><td>$service</td><td>$outcome</td><td>$($_.Total)</td><td>$($_.Pass)</td><td>$($_.Problems)</td><td>$($_.NotEvaluated)</td><td>$($_.Errors)</td></tr>"
+        "<tr><td>$service</td><td>$outcome</td><td>$($_.Total)</td><td>$($_.Pass)</td><td>$($_.Problems)</td><td>$($_.Suppressed)</td><td>$($_.NotEvaluated)</td><td>$($_.Errors)</td></tr>"
     }) -join "`n"
 
     $passRate = if ($Summary.Evaluated -gt 0) { [math]::Round((($Summary.Pass) / $Summary.Evaluated) * 100, 1) } else { 0 }
     $tenant = ConvertTo-CaHtmlEncoded $TenantName
     $gen = ConvertTo-CaHtmlEncoded $Summary.GeneratedUtc
     $outcome = ConvertTo-CaHtmlEncoded $Summary.Outcome
-    $outcomeClass = switch ($Summary.Outcome) { 'ExecutionError' { 'error' } 'IssuesFound' { 'fail' } 'Attention' { 'warning' } default { 'pass' } }
+    $outcomeClass = switch ($Summary.Outcome) { 'ExecutionError' { 'error' } 'Incomplete' { 'warning' } 'IssuesFound' { 'fail' } 'Attention' { 'warning' } default { 'pass' } }
 
     $css = @'
  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f6f8fa;color:#1f2328}
@@ -463,33 +621,38 @@ function New-CaHtmlBody {
     [void]$sb.AppendLine("<style>$css</style></head><body><div class=`"wrap`">")
     [void]$sb.AppendLine('<h1>Claudit &mdash; multi-cloud diagnostic audit</h1>')
     [void]$sb.AppendLine("<div class=`"sub`">$tenant &middot; generated $gen UTC &middot; read-only</div>")
-    [void]$sb.AppendLine("<div class=`"outcome $outcomeClass`"><strong>Overall outcome: $outcome</strong><span>Evaluation coverage $($Summary.CoveragePercent)% ($($Summary.Evaluated)/$($Summary.Total)); $($Summary.ProblemsDetected) problems detected; $($Summary.BlockingErrors) execution errors.</span></div>")
+    [void]$sb.AppendLine("<div class=`"outcome $outcomeClass`"><strong>Overall outcome: $outcome</strong><span>Evaluation coverage $($Summary.CoveragePercent)% ($($Summary.Evaluated)/$($Summary.Applicable)); $($Summary.ProblemsDetected) problems detected; $($Summary.Suppressed) suppressed; $($Summary.BlockingErrors) execution errors; $($Summary.Skipped) required checks skipped.</span></div>")
     [void]$sb.AppendLine('<div class="cards">')
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`">$($Summary.Total)</div><div class=`"l`">Checks</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#1a7f37`">$($Summary.Pass)</div><div class=`"l`">Pass ($passRate%)</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#cf222e`">$($Summary.Fail)</div><div class=`"l`">Fail</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#bf8700`">$($Summary.Warning)</div><div class=`"l`">Warning</div></div>")
+    [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#6e7781`">$($Summary.Suppressed)</div><div class=`"l`">Suppressed</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#8b949e`">$($Summary.NotEvaluated)</div><div class=`"l`">Not evaluated</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#cf222e`">$($Summary.BlockingErrors)</div><div class=`"l`">Execution errors</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#cf222e`">$($Summary.Critical)</div><div class=`"l`">Critical</div></div>")
     [void]$sb.AppendLine("<div class=`"card`"><div class=`"n`" style=`"color:#d1242f`">$($Summary.High)</div><div class=`"l`">High</div></div>")
     [void]$sb.AppendLine('</div>')
-    [void]$sb.AppendLine('<h2>Problems detected</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Controls</th><th>Detail</th><th>Recommendation</th></tr></thead><tbody>')
+    [void]$sb.AppendLine('<h2>Problems detected</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Categories</th><th>Controls</th><th>Detail</th><th>Recommendation</th></tr></thead><tbody>')
     [void]$sb.AppendLine($problemRowsHtml)
     [void]$sb.AppendLine('</tbody></table></div>')
-    [void]$sb.AppendLine('<h2>Execution errors blocking evaluation</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Controls</th><th>Detail / diagnostic</th><th>Recovery</th></tr></thead><tbody>')
+    [void]$sb.AppendLine('<h2>Suppressed findings</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Categories</th><th>Controls</th><th>Detail / exception</th><th>Recommendation</th></tr></thead><tbody>')
+    [void]$sb.AppendLine($suppressedRowsHtml)
+    [void]$sb.AppendLine('</tbody></table></div>')
+    [void]$sb.AppendLine('<h2>Execution errors blocking evaluation</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Categories</th><th>Controls</th><th>Detail / diagnostic</th><th>Recovery</th></tr></thead><tbody>')
     [void]$sb.AppendLine($errorRowsHtml)
     [void]$sb.AppendLine('</tbody></table></div>')
-    [void]$sb.AppendLine('<h2>Not evaluated</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Controls</th><th>Reason</th><th>Recommendation</th></tr></thead><tbody>')
+    [void]$sb.AppendLine('<h2>Not evaluated</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Categories</th><th>Controls</th><th>Reason</th><th>Recommendation</th></tr></thead><tbody>')
     [void]$sb.AppendLine($skippedRowsHtml)
     [void]$sb.AppendLine('</tbody></table></div>')
-    [void]$sb.AppendLine('<h2>Service coverage</h2><div class="table-wrap"><table><thead><tr><th>Service</th><th>Outcome</th><th>Total</th><th>Pass</th><th>Problems</th><th>Not evaluated</th><th>Errors</th></tr></thead><tbody>')
+    [void]$sb.AppendLine('<h2>Service coverage</h2><div class="table-wrap"><table><thead><tr><th>Service</th><th>Outcome</th><th>Total</th><th>Pass</th><th>Problems</th><th>Suppressed</th><th>Not evaluated</th><th>Errors</th></tr></thead><tbody>')
     [void]$sb.AppendLine($serviceRows)
     [void]$sb.AppendLine('</tbody></table></div>')
-    [void]$sb.AppendLine('<h2>Complete results</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Controls</th><th>Detail</th><th>Recommendation</th></tr></thead><tbody>')
+    [void]$sb.AppendLine('<h2>Complete results</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>Level</th><th>Service</th><th>Check</th><th>Status</th><th>Severity</th><th>Categories</th><th>Controls</th><th>Detail</th><th>Recommendation</th></tr></thead><tbody>')
     [void]$sb.AppendLine($rowsHtml)
     [void]$sb.AppendLine('</tbody></table></div>')
-    [void]$sb.AppendLine('<footer>Claudit 0.1 &middot; read-only audit &middot; control IDs are an indicative cross-reference &middot; verify findings against your own policy before acting.</footer>')
+    $safeVersion = ConvertTo-CaHtmlEncoded $Version
+    [void]$sb.AppendLine("<footer>Claudit $safeVersion &middot; schema v2 &middot; read-only audit &middot; control IDs are indicative cross-references &middot; verify findings against your own policy before acting.</footer>")
     [void]$sb.AppendLine('</div></body></html>')
     $sb.ToString()
 }

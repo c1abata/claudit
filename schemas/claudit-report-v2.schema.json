@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/c1abata/claudit/blob/main/schemas/claudit-report-v2.schema.json",
+  "title": "Claudit audit report schema v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "SchemaVersion", "Schema", "ReportType", "ReportId", "Tenant",
+    "Provenance", "ControlCatalog", "CheckMetadataCatalog", "ExceptionPolicy", "Summary", "Problems",
+    "SuppressedFindings", "ExecutionErrors", "NotEvaluated", "Findings"
+  ],
+  "properties": {
+    "SchemaVersion": { "const": "2.0" },
+    "Schema": { "type": "string", "format": "uri" },
+    "ReportType": { "const": "ClauditAudit" },
+    "ReportId": { "type": "string", "format": "uuid" },
+    "Tenant": { "type": "string" },
+    "Provenance": {
+      "type": "object",
+      "required": ["RunId", "Producer", "StartedUtc", "CompletedUtc", "Baseline", "DependencyLock", "Scope", "Completeness", "ArtifactManifest"],
+      "properties": {
+        "RunId": { "type": "string", "format": "uuid" },
+        "Producer": {
+          "type": "object",
+          "required": ["Name", "Version", "Commit", "Project", "ReportSchema"],
+          "properties": {
+            "Name": { "const": "Claudit" },
+            "Version": { "type": "string" },
+            "Commit": { "type": "string" },
+            "Project": { "type": "string", "format": "uri" },
+            "ReportSchema": { "const": "2.0" }
+          }
+        },
+        "StartedUtc": { "type": "string", "format": "date-time" },
+        "CompletedUtc": { "type": "string", "format": "date-time" },
+        "Baseline": {
+          "type": "object",
+          "required": ["Name", "Sha256"],
+          "properties": {
+            "Name": { "type": "string" },
+            "Sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "DependencyLock": { "type": "object" },
+        "Scope": { "type": "object" },
+        "Completeness": { "type": "array" },
+        "ArtifactManifest": { "type": "string", "pattern": "\\.sha256$" }
+      }
+    },
+    "ControlCatalog": {
+      "type": "object",
+      "required": ["Version", "FullFrameworkCoverage", "CoverageModel", "Artifact"],
+      "properties": {
+        "Version": { "type": "string" },
+        "FullFrameworkCoverage": { "type": "boolean" },
+        "CoverageModel": { "type": "string" },
+        "Artifact": { "type": "string" }
+      }
+    },
+    "CheckMetadataCatalog": {
+      "type": "object",
+      "required": ["Version", "Profiles", "Checks", "CoverageModel", "Artifact"],
+      "properties": {
+        "Version": { "type": "string" },
+        "Profiles": { "type": "integer", "minimum": 1 },
+        "Checks": { "type": "integer", "minimum": 1 },
+        "CoverageModel": { "type": "string" },
+        "Artifact": { "type": "string" }
+      }
+    },
+    "ExceptionPolicy": {
+      "type": "object",
+      "required": [
+        "Enabled", "SchemaVersion", "File", "Sha256", "RuleCount",
+        "ActiveRuleCount", "ExpiredRuleCount", "AppliedRuleCount", "SuppressedFindingCount"
+      ],
+      "properties": {
+        "Enabled": { "type": "boolean" },
+        "SchemaVersion": { "const": "1.0" },
+        "File": { "type": "string" },
+        "Sha256": { "type": "string", "pattern": "^$|^[0-9a-f]{64}$" },
+        "RuleCount": { "type": "integer", "minimum": 0 },
+        "ActiveRuleCount": { "type": "integer", "minimum": 0 },
+        "ExpiredRuleCount": { "type": "integer", "minimum": 0 },
+        "AppliedRuleCount": { "type": "integer", "minimum": 0 },
+        "SuppressedFindingCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Summary": {
+      "type": "object",
+      "required": ["Outcome", "Total", "Applicable", "Evaluated", "NotEvaluated", "CoveragePercent", "Suppressed", "RecommendedExitCode", "Services"],
+      "properties": {
+        "Outcome": { "enum": ["Pass", "IssuesFound", "Attention", "Incomplete", "ExecutionError", "NotApplicable", "Empty"] },
+        "Total": { "type": "integer", "minimum": 0 },
+        "Applicable": { "type": "integer", "minimum": 0 },
+        "Evaluated": { "type": "integer", "minimum": 0 },
+        "NotEvaluated": { "type": "integer", "minimum": 0 },
+        "CoveragePercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "Suppressed": { "type": "integer", "minimum": 0 },
+        "RecommendedExitCode": { "enum": [0, 2, 3] },
+        "Services": { "type": "array" }
+      }
+    },
+    "Problems": { "type": "array", "items": { "$ref": "#/definitions/finding" } },
+    "SuppressedFindings": { "type": "array", "items": { "$ref": "#/definitions/finding" } },
+    "ExecutionErrors": { "type": "array", "items": { "$ref": "#/definitions/finding" } },
+    "NotEvaluated": { "type": "array", "items": { "$ref": "#/definitions/finding" } },
+    "Findings": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/finding" } }
+  },
+  "definitions": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "FindingId", "Service", "CheckId", "ResourceKeyHash", "EvidenceHash", "ControlLevel",
+        "Title", "Status", "Outcome", "Severity", "MetadataCatalogVersion", "MetadataProfile", "MetadataSource",
+        "DefaultSeverity", "Categories", "Threats", "Risk", "DependsOn", "RelatedTo",
+        "IsBlocking", "IsSuppressed", "Suppression", "ControlIds",
+        "FailureCategory", "TimestampUtc"
+      ],
+      "properties": {
+        "FindingId": { "type": "string", "pattern": "^claudit:[0-9a-f]{64}$" },
+        "Service": { "type": "string" },
+        "CheckId": { "type": "string", "pattern": "^[A-Z]+-[0-9]{3}$" },
+        "ScopeId": { "type": "string" },
+        "ResourceType": { "type": "string" },
+        "ResourceId": { "type": "string" },
+        "ResourceKeyHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "EvidenceHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ControlLevel": { "enum": ["Formal", "Passive", "Active"] },
+        "Title": { "type": "string" },
+        "Status": { "enum": ["Pass", "Fail", "Warning", "Info", "Error", "Skipped", "NotApplicable", "Investigate"] },
+        "Outcome": { "enum": ["Passed", "Issue", "Attention", "ExecutionError", "NotEvaluated", "NotApplicable", "Informational"] },
+        "Severity": { "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+        "MetadataCatalogVersion": { "type": "string" },
+        "MetadataProfile": { "type": "string" },
+        "MetadataSource": { "type": "string" },
+        "DefaultSeverity": { "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+        "Categories": { "type": "array", "items": { "type": "string" } },
+        "Threats": { "type": "array", "items": { "type": "string" } },
+        "Risk": { "type": "string" },
+        "DependsOn": { "type": "array", "items": { "type": "string" } },
+        "RelatedTo": { "type": "array", "items": { "type": "string" } },
+        "IsBlocking": { "type": "boolean" },
+        "IsSuppressed": { "type": "boolean" },
+        "Suppression": {
+          "type": ["object", "null"],
+          "required": ["RuleId", "Reason", "Owner", "Ticket", "ExpiresUtc", "AppliedUtc"],
+          "properties": {
+            "RuleId": { "type": "string" },
+            "Reason": { "type": "string" },
+            "Owner": { "type": "string" },
+            "Ticket": { "type": "string" },
+            "ExpiresUtc": { "type": "string", "format": "date-time" },
+            "AppliedUtc": { "type": "string", "format": "date-time" }
+          }
+        },
+        "ControlIds": { "type": "array", "items": { "type": "string" } },
+        "FailureCategory": { "enum": ["None", "Prerequisite", "Authentication", "Authorization", "Connectivity", "Timeout", "RateLimit", "Data", "Internal"] },
+        "TimestampUtc": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -102,7 +102,7 @@ Usage:
 
 Core options:
   -Service <list>          Entra, Exchange, SharePoint, OneDrive, Azure, AWS, GCP, Tailscale, Domain, VPS, Inventory, M365, All
-  -Format <fmt>            Html, Json, Markdown, Csv, All
+  -Format <fmt>            Html, Json, Markdown, Csv, Ocsf, Oscal, Catalog, All
   -OutputDirectory <path>  Report folder
   -TenantName <name>       Display name in reports
   -BaselinePath <path>     Custom baseline JSON
@@ -160,7 +160,7 @@ Operator tricks:
   - Domain mode refuses implicit targets; pass only pre-authorized domains.
   - VPS mode runs local/SSH read-only shell probes; no agent is installed.
   - Tailscale tokens are never stored; set them only in the current process.
-  - Exit code 2 means Critical/High failures or runtime Error findings.
+  - Exit code 2 means Critical/High findings; exit code 3 means incomplete evaluation or runtime Error findings.
 '@
         }
         'Start-ClauditSafeAudit' {
@@ -182,7 +182,7 @@ Common options:
   -ConfirmActiveProbes            Required second consent gate for Active
   -VpsProbePort <list>            Explicit VPS ports for bounded reachability checks
   -OutputDirectory <path>         Run output directory
-  -Format <fmt>                   Html, Json, Markdown, Csv, All
+  -Format <fmt>                   Html, Json, Markdown, Csv, Ocsf, Oscal, Catalog, All
   -RunPester                      Run compliance replay after report generation
   -CompareWith <json>             Drift comparison baseline
   -NotifyWebhook <url>            Teams/Slack webhook, never used unless supplied

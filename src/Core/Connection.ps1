@@ -44,11 +44,22 @@ $script:CaState = [pscustomobject]@{
 
 function Import-CaModule {
     param([Parameter(Mandatory)][string]$Name)
-    if (Get-Module -Name $Name) { return }
-    if (-not (Get-Module -ListAvailable -Name $Name)) {
-        throw "Required module '$Name' is not installed. Install it with: Install-Module $Name -Scope CurrentUser"
+    $lockPath = Join-Path $PSScriptRoot '..\..\config\dependencies.psd1'
+    if (-not (Test-Path -LiteralPath $lockPath)) { throw "Dependency lock not found: $lockPath" }
+    $lock = Import-PowerShellDataFile -LiteralPath $lockPath
+    $requiredVersion = [string]$lock.PowerShellModules[$Name]
+    if ([string]::IsNullOrWhiteSpace($requiredVersion)) { throw "Module '$Name' is not declared in config/dependencies.psd1." }
+    $loaded = Get-Module -Name $Name
+    if ($loaded) {
+        if ($loaded.Version -ne [version]$requiredVersion) {
+            throw "Module '$Name' $($loaded.Version) is already loaded; Claudit requires $requiredVersion. Start a clean PowerShell session."
+        }
+        return
     }
-    Import-Module $Name -ErrorAction Stop -Verbose:$false | Out-Null
+    if (-not (Get-Module -ListAvailable -Name $Name | Where-Object Version -eq ([version]$requiredVersion))) {
+        throw "Required module '$Name' $requiredVersion is not installed. Run .\Install-ClauditPrerequisites.ps1 -ConfirmInstall."
+    }
+    Import-Module $Name -RequiredVersion $requiredVersion -ErrorAction Stop -Verbose:$false | Out-Null
 }
 
 function ConvertTo-CaBase64Url {
@@ -163,8 +174,51 @@ function Start-CaTemporaryBrowser {
         New-Item -ItemType Directory -Path $ProfilePath -Force | Out-Null
     }
 
-    $args = @("--user-data-dir=$ProfilePath", '--new-window', '--no-first-run', '--no-default-browser-check', $Uri)
-    Start-Process -FilePath $browser -ArgumentList $args -PassThru
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $browser
+    $startInfo.UseShellExecute = $false
+    foreach ($argument in @("--user-data-dir=$ProfilePath", '--new-window', '--no-first-run', '--no-default-browser-check', $Uri)) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "Failed to start temporary browser '$browser'." }
+    return $process
+}
+
+function Stop-CaTemporaryBrowser {
+    param([AllowNull()]$Process)
+
+    if ($null -eq $Process) { return }
+    try {
+        if ($Process.HasExited) { return }
+        try { $Process.CloseMainWindow() | Out-Null } catch {}
+        if ($Process.WaitForExit(3000)) { return }
+        $Process.Kill($true)
+        if (-not $Process.WaitForExit(5000)) {
+            throw 'Temporary browser did not exit after forced termination.'
+        }
+    }
+    catch {
+        throw "Cannot terminate temporary authentication browser: $($_.Exception.Message)"
+    }
+}
+
+function Remove-CaTemporaryBrowserProfile {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+
+    if (-not (Test-Path -LiteralPath $ProfilePath)) { return }
+    $lastError = $null
+    foreach ($attempt in 1..5) {
+        try {
+            Remove-Item -LiteralPath $ProfilePath -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $ProfilePath)) { return }
+        }
+        catch { $lastError = $_.Exception.Message }
+        Start-Sleep -Milliseconds 100
+    }
+    $reason = if ($lastError) { $lastError } else { 'path still exists after deletion attempts' }
+    throw "Sensitive temporary browser profile was not removed: '$ProfilePath'. $reason"
 }
 
 function Read-CaOAuthRedirectCode {
@@ -264,12 +318,8 @@ function Invoke-CaGraphTemporaryBrowserAuth {
     }
     finally {
         $listener.Stop()
-        if ($browserProcess -and -not $browserProcess.HasExited) {
-            try { $browserProcess.CloseMainWindow() | Out-Null } catch {}
-        }
-        if (Test-Path -LiteralPath $profilePath) {
-            Remove-Item -LiteralPath $profilePath -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        try { Stop-CaTemporaryBrowser -Process $browserProcess }
+        finally { Remove-CaTemporaryBrowserProfile -ProfilePath $profilePath }
     }
 }
 

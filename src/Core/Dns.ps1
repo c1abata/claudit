@@ -26,6 +26,40 @@ function Clear-CaDnsQueryCache {
     $script:CaDnsQueryCache = @{}
 }
 
+function Invoke-CaDnsResolverQuery {
+    param(
+        [Parameter(Mandatory)][string]$Resolver,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Type,
+        [ValidateRange(1, 60)][int]$TimeoutSec = 10
+    )
+
+    $uri = "$Resolver`?name=$([uri]::EscapeDataString($Name))&type=$Type&do=true&cd=false"
+    $response = Invoke-RestMethod -Uri $uri -Headers @{ accept = 'application/dns-json' } `
+        -TimeoutSec $TimeoutSec -ErrorAction Stop
+    $statusNumber = if ($response.PSObject.Properties.Name -contains 'Status') { [int]$response.Status } else { -1 }
+    $status = if ($script:CaDnsStatusCodes.ContainsKey($statusNumber)) {
+        $script:CaDnsStatusCodes[$statusNumber]
+    }
+    else { "RCODE-$statusNumber" }
+    $authenticated = ($response.PSObject.Properties.Name -contains 'AD') -and [bool]$response.AD
+    $answers = if ($response.PSObject.Properties.Name -contains 'Answer') { @($response.Answer) } else { @() }
+    $records = @($answers | Where-Object {
+        -not $script:CaDnsTypeCodes.ContainsKey($Type) -or [int]$_.type -eq $script:CaDnsTypeCodes[$Type]
+    } | ForEach-Object {
+        [pscustomobject]@{
+            Name = ([string]$_.name).TrimEnd('.')
+            Type = $Type
+            TTL  = [int]$_.TTL
+            Data = ConvertTo-CaDnsText -Text ([string]$_.data)
+        }
+    })
+    [pscustomobject]@{
+        Name=$Name; Type=$Type; Status=$status; StatusCode=$statusNumber
+        AuthenticatedData=$authenticated; Records=$records; Resolver=$Resolver; Error=''
+    }
+}
+
 function Resolve-CaDnsQuery {
     [CmdletBinding()]
     param(
@@ -46,44 +80,27 @@ function Resolve-CaDnsQuery {
     }
 
     $errors = [System.Collections.Generic.List[string]]::new()
+    $protocolResults = [System.Collections.Generic.List[object]]::new()
     foreach ($resolver in $script:CaDnsResolvers) {
         try {
-            $uri = "$resolver`?name=$([uri]::EscapeDataString($queryName))&type=$queryType&do=true&cd=false"
-            $response = Invoke-RestMethod -Uri $uri -Headers @{ accept = 'application/dns-json' } `
-                -TimeoutSec $TimeoutSec -ErrorAction Stop
-            $statusNumber = if ($response.PSObject.Properties.Name -contains 'Status') { [int]$response.Status } else { -1 }
-            $status = if ($script:CaDnsStatusCodes.ContainsKey($statusNumber)) {
-                $script:CaDnsStatusCodes[$statusNumber]
+            $result = Invoke-CaDnsResolverQuery -Resolver $resolver -Name $queryName -Type $queryType -TimeoutSec $TimeoutSec
+            if ($result.Status -in @('NOERROR', 'NXDOMAIN')) {
+                if (-not $NoCache) { $script:CaDnsQueryCache[$cacheKey] = $result }
+                return $result
             }
-            else { "RCODE-$statusNumber" }
-            $authenticated = ($response.PSObject.Properties.Name -contains 'AD') -and [bool]$response.AD
-            $answers = if ($response.PSObject.Properties.Name -contains 'Answer') { @($response.Answer) } else { @() }
-            $records = @($answers | Where-Object {
-                -not $script:CaDnsTypeCodes.ContainsKey($queryType) -or [int]$_.type -eq $script:CaDnsTypeCodes[$queryType]
-            } | ForEach-Object {
-                [pscustomobject]@{
-                    Name = ([string]$_.name).TrimEnd('.')
-                    Type = $queryType
-                    TTL  = [int]$_.TTL
-                    Data = ConvertTo-CaDnsText -Text ([string]$_.data)
-                }
-            })
-            $result = [pscustomobject]@{
-                Name              = $queryName
-                Type              = $queryType
-                Status            = $status
-                StatusCode        = $statusNumber
-                AuthenticatedData = $authenticated
-                Records           = $records
-                Resolver          = $resolver
-                Error             = ''
-            }
-            if (-not $NoCache) { $script:CaDnsQueryCache[$cacheKey] = $result }
-            return $result
+            $protocolResults.Add($result)
+            $errors.Add("${resolver}: $($result.Status)")
         }
         catch {
             $errors.Add("${resolver}: $($_.Exception.Message)")
         }
+    }
+
+    if ($protocolResults.Count -gt 0 -and -not (Get-Command -Name Resolve-DnsName -ErrorAction SilentlyContinue)) {
+        $result = $protocolResults[0]
+        $result.Error = $errors -join ' | '
+        if (-not $NoCache) { $script:CaDnsQueryCache[$cacheKey] = $result }
+        return $result
     }
 
     if (Get-Command -Name Resolve-DnsName -ErrorAction SilentlyContinue) {
@@ -130,11 +147,22 @@ function Resolve-CaDnssecStatus {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Name)
 
-    $query = Resolve-CaDnsQuery -Name $Name -Type SOA
-    if ($query.Status -eq 'SERVFAIL') { return 'Bogus' }
-    if ($query.Status -ne 'NOERROR') { return 'Indeterminate' }
-    if ($query.AuthenticatedData) { return 'Secure' }
-    return 'Insecure'
+    $queryName = $Name.Trim().TrimEnd('.').ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($queryName)) { throw 'DNS query name is empty.' }
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    foreach ($resolver in $script:CaDnsResolvers) {
+        try { $results.Add((Invoke-CaDnsResolverQuery -Resolver $resolver -Name $queryName -Type SOA)) }
+        catch { }
+    }
+    if ($results.Count -eq 0) { return 'Indeterminate' }
+
+    $healthy = @($results | Where-Object Status -eq 'NOERROR')
+    if ($healthy.Count -ne $results.Count) { return 'Indeterminate' }
+    $secure = @($healthy | Where-Object AuthenticatedData).Count
+    if ($secure -eq $healthy.Count) { return 'Secure' }
+    if ($secure -eq 0) { return 'Insecure' }
+    return 'Indeterminate'
 }
 
 function ConvertTo-CaDnsText {

@@ -24,6 +24,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$dependencyLockPath = Join-Path $PSScriptRoot 'config\dependencies.psd1'
+if (-not (Test-Path -LiteralPath $dependencyLockPath)) { throw "Dependency lock not found: $dependencyLockPath" }
+$dependencyLock = Import-PowerShellDataFile -LiteralPath $dependencyLockPath
+
 $moduleManifest = Join-Path $PSScriptRoot 'Claudit.psd1'
 if (Test-Path -LiteralPath $moduleManifest) {
     Import-Module $moduleManifest -Force -ErrorAction Stop
@@ -88,16 +92,17 @@ if ($Service -contains 'Inventory') {
 
 $modules = $modules | Sort-Object -Unique
 foreach ($name in $modules) {
-    $installed = Get-Module -ListAvailable -Name $name | Sort-Object Version -Descending | Select-Object -First 1
-    if ($installed -and (-not ($name -eq 'Pester' -and $installed.Version -lt [version]'5.0'))) {
+    $requiredVersion = [string]$dependencyLock.PowerShellModules[$name]
+    if ([string]::IsNullOrWhiteSpace($requiredVersion)) { throw "Module '$name' is not declared in config/dependencies.psd1." }
+    $installed = Get-Module -ListAvailable -Name $name | Where-Object Version -eq ([version]$requiredVersion) | Select-Object -First 1
+    if ($installed) {
         Write-Host "Already installed: $name $($installed.Version)" -ForegroundColor Green
         continue
     }
 
-    $minimum = if ($name -eq 'Pester') { @{ MinimumVersion = '5.0.0' } } else { @{} }
-    Write-Host "Installing: $name" -ForegroundColor Cyan
+    Write-Host "Installing: $name $requiredVersion" -ForegroundColor Cyan
     try {
-        Install-Module -Name $name -Scope CurrentUser -Force -AllowClobber @minimum -ErrorAction Stop
+        Install-Module -Name $name -RequiredVersion $requiredVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
     }
     catch {
         throw "Failed to install module '$name': $($_.Exception.Message)"

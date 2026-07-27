@@ -15,6 +15,7 @@ config/*.profile.json
 
 # Local audit evidence and runtime state
 /reports/
+/dist/
 /test[0-9]*/
 /testacad*/
 /testv*/

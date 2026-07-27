@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Claudit.psm1'
-    ModuleVersion     = '0.2.0'
+    ModuleVersion     = '0.3.1'
     GUID              = 'b3f1c0d2-7a4e-4d9c-9b2a-2f6e1c8d3a01'
     Author            = 'Claudit Project'
     CompanyName       = 'Claudit (FOSS)'
@@ -35,10 +35,15 @@
         'Assert-CaNoRemainingArgument',
         'Show-CaCommandHelp',
         'Get-CaBaseline',
+        'New-CaCheckAssessment',
+        'ConvertTo-CaFinding',
         'New-CaFinding',
         'Invoke-CaCheck',
         'Invoke-CaGraphRequest',
         'Get-CaControlIds',
+        'Get-CaControlCatalog',
+        'Get-CaCheckMetadata',
+        'Get-CaCheckMetadataCatalog',
         'Get-CaEntraFindings',
         'Get-CaExchangeFindings',
         'Get-CaSharePointFindings',
@@ -67,8 +72,8 @@
         PSData = @{
             Tags         = @('Microsoft365', 'Azure', 'AWS', 'GCP', 'Tailscale', 'VPS', 'Linux', 'SSH', 'DNS', 'Domain', 'Security', 'Audit', 'Entra', 'Exchange', 'SharePoint', 'OneDrive', 'Misconfiguration', 'Inventory', 'CISA', 'CIS', 'EIDSCA')
             LicenseUri   = 'https://opensource.org/licenses/MIT'
-            ProjectUri   = 'https://github.com/'
-            ReleaseNotes = 'v0.2.0 stable. Adds cumulative formal/passive/active DNS auditing, multi-resolver RCODE and DNSSEC evidence, RFC mail-security checks, optional bounded dnsx execution, Pester coverage and portable dashboard branding.'
+            ProjectUri   = 'https://github.com/c1abata/claudit'
+            ReleaseNotes = 'v0.3.1 stability release. Closes missing-control false greens, records cumulative control-level applicability and emits OCSF 1.8 Compliance Findings with normalized status.'
         }
     }
 }

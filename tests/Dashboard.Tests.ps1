@@ -40,5 +40,38 @@ Describe 'Claudit dashboard assets' {
             { Resolve-CaDashboardSafePath -Root $script:CaDashboardAssetRoot -RelativePath 'icons/logo/favicon.png' } | Should -Not -Throw
             { Resolve-CaDashboardSafePath -Root $script:CaDashboardAssetRoot -RelativePath '..\..\README.md' } | Should -Throw
         }
+
+        It 'preserves adversarial child arguments as native argv entries' {
+            $arguments = @('-File', 'C:\path with spaces\audit.ps1', '-Tenant', 'quoted"value', '-Output', 'C:\trailing slash\')
+
+            $startInfo = New-CaDashboardProcessStartInfo -FilePath 'pwsh' -Arguments $arguments
+
+            @($startInfo.ArgumentList).Count | Should -Be $arguments.Count
+            for ($i = 0; $i -lt $arguments.Count; $i++) {
+                $startInfo.ArgumentList[$i] | Should -BeExactly $arguments[$i]
+            }
+            $startInfo.UseShellExecute | Should -BeFalse
+        }
+
+        It 'normalizes skipped-only schema-v1 reports as incomplete' {
+            $path = Join-Path $TestDrive 'legacy-report.json'
+            [pscustomobject]@{
+                Summary = [pscustomobject]@{
+                    Outcome = 'Pass'
+                    Total = 1
+                    Pass = 0
+                    Fail = 0
+                    Warning = 0
+                    Error = 0
+                    Skipped = 1
+                }
+            } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $path -Encoding UTF8
+
+            $summary = Get-CaDashboardReportSummary -Path $path
+
+            $summary.Outcome | Should -Be 'Incomplete'
+            $summary.NotEvaluated | Should -Be 1
+            $summary.Coverage | Should -Be 0
+        }
     }
 }

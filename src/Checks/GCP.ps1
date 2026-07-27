@@ -87,6 +87,22 @@ function Get-CaGcpBucketName {
     return $name
 }
 
+function Test-CaGcpPortSpecificationIncludes {
+    param(
+        [AllowNull()][string]$Specification,
+        [Parameter(Mandatory)][ValidateRange(1, 65535)][int]$Port
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Specification)) { return $true }
+    if ($Specification -match '^\s*(\d{1,5})\s*-\s*(\d{1,5})\s*$') {
+        $start = [int]$Matches[1]
+        $end = [int]$Matches[2]
+        return $start -le $Port -and $Port -le $end
+    }
+    $value = 0
+    return [int]::TryParse($Specification.Trim(), [ref]$value) -and $value -eq $Port
+}
+
 function Test-CaGcpContext {
     Invoke-CaCheck -Service GCP -CheckId 'GCP-001' -Title 'GCP CLI context resolved' -Body {
         $config = Invoke-CaGcloudJson -Arguments @('config', 'list')
@@ -132,17 +148,22 @@ function Test-CaGcpServiceAccountKeys {
         $cutoff = [DateTime]::UtcNow.AddDays(-$maxDays)
         $accounts = Invoke-CaGcloudJson -Arguments @('iam', 'service-accounts', 'list', '--project', $project)
         $stale = [System.Collections.Generic.List[string]]::new()
+        $errors = [System.Collections.Generic.List[string]]::new()
 
         foreach ($sa in @($accounts)) {
             $email = [string]$sa.email
             if ([string]::IsNullOrWhiteSpace($email)) { continue }
             $keys = Invoke-CaGcloudJson -Arguments @('iam', 'service-accounts', 'keys', 'list', '--iam-account', $email, '--managed-by', 'user', '--project', $project) -AllowFailure
-            if (-not $keys.Success) { continue }
+            if (-not $keys.Success) { $errors.Add("${email}: $($keys.Text)"); continue }
             foreach ($key in @($keys.Json)) {
                 if ($key.validAfterTime -and ([DateTime]$key.validAfterTime) -lt $cutoff) {
                     $stale.Add("$email/$($key.name)")
                 }
             }
+        }
+
+        if ($errors.Count -gt 0) {
+            throw "Service-account keys could not be completely evaluated: $($errors -join ' | ')"
         }
 
         if ($stale.Count -eq 0) {
@@ -185,10 +206,12 @@ function Test-CaGcpPublicBuckets {
     Invoke-CaCheck -Service GCP -CheckId 'GCP-005' -Title 'No public Cloud Storage buckets' -Body {
         $project = Get-CaGcpProject
         $public = [System.Collections.Generic.List[string]]::new()
-        foreach ($bucket in (Get-CaGcpBuckets -Project $project)) {
+        $errors = [System.Collections.Generic.List[string]]::new()
+        $buckets = @(Get-CaGcpBuckets -Project $project)
+        foreach ($bucket in $buckets) {
             $name = Get-CaGcpBucketName -Bucket $bucket
             $policy = Invoke-CaGcloudJson -Arguments @('storage', 'buckets', 'get-iam-policy', "gs://$name") -AllowFailure
-            if (-not $policy.Success) { continue }
+            if (-not $policy.Success) { $errors.Add("${name}: $($policy.Text)"); continue }
             foreach ($binding in @($policy.Json.bindings)) {
                 if (@($binding.members) -contains 'allUsers' -or @($binding.members) -contains 'allAuthenticatedUsers') {
                     $public.Add("$name/$($binding.role)")
@@ -196,7 +219,15 @@ function Test-CaGcpPublicBuckets {
             }
         }
 
-        if ($public.Count -eq 0) {
+        if ($errors.Count -gt 0) {
+            throw "Bucket IAM could not be completely evaluated: $($errors -join ' | ')"
+        }
+
+        if ($buckets.Count -eq 0) {
+            New-CaFinding -Service GCP -CheckId 'GCP-005' -Title 'No public Cloud Storage buckets' -Status NotApplicable `
+                -Detail 'No Cloud Storage bucket exists in the successfully queried project.'
+        }
+        elseif ($public.Count -eq 0) {
             New-CaFinding -Service GCP -CheckId 'GCP-005' -Title 'No public Cloud Storage buckets' -Status Pass `
                 -Detail 'No bucket IAM binding grants allUsers or allAuthenticatedUsers.' -Evidence $public
         }
@@ -213,15 +244,26 @@ function Test-CaGcpUniformBucketAccess {
     Invoke-CaCheck -Service GCP -CheckId 'GCP-006' -Title 'Uniform bucket-level access enabled' -Body {
         $project = Get-CaGcpProject
         $missing = [System.Collections.Generic.List[string]]::new()
-        foreach ($bucket in (Get-CaGcpBuckets -Project $project)) {
+        $errors = [System.Collections.Generic.List[string]]::new()
+        $buckets = @(Get-CaGcpBuckets -Project $project)
+        foreach ($bucket in $buckets) {
             $name = Get-CaGcpBucketName -Bucket $bucket
             $desc = Invoke-CaGcloudJson -Arguments @('storage', 'buckets', 'describe', "gs://$name") -AllowFailure
-            if ($desc.Success -and -not [bool]$desc.Json.iamConfiguration.uniformBucketLevelAccess.enabled) {
+            if (-not $desc.Success) { $errors.Add("${name}: $($desc.Text)"); continue }
+            if (-not [bool]$desc.Json.iamConfiguration.uniformBucketLevelAccess.enabled) {
                 $missing.Add($name)
             }
         }
 
-        if ($missing.Count -eq 0) {
+        if ($errors.Count -gt 0) {
+            throw "Bucket uniform access could not be completely evaluated: $($errors -join ' | ')"
+        }
+
+        if ($buckets.Count -eq 0) {
+            New-CaFinding -Service GCP -CheckId 'GCP-006' -Title 'Uniform bucket-level access enabled' -Status NotApplicable `
+                -Detail 'No Cloud Storage bucket exists in the successfully queried project.'
+        }
+        elseif ($missing.Count -eq 0) {
             New-CaFinding -Service GCP -CheckId 'GCP-006' -Title 'Uniform bucket-level access enabled' -Status Pass `
                 -Detail 'All discovered buckets use uniform bucket-level access.' -Evidence $missing
         }
@@ -272,7 +314,11 @@ function Test-CaGcpOpenAdminFirewall {
             foreach ($allow in @($rule.allowed)) {
                 $proto = [string]$allow.IPProtocol
                 $ports = @($allow.ports)
-                if ($proto -eq 'all' -or ($proto -eq 'tcp' -and ($ports.Count -eq 0 -or $ports -contains '22' -or $ports -contains '3389'))) {
+                $adminPort = @($ports | Where-Object {
+                    (Test-CaGcpPortSpecificationIncludes -Specification ([string]$_) -Port 22) -or
+                    (Test-CaGcpPortSpecificationIncludes -Specification ([string]$_) -Port 3389)
+                }).Count -gt 0
+                if ($proto -eq 'all' -or ($proto -eq 'tcp' -and ($ports.Count -eq 0 -or $adminPort))) {
                     $bad.Add($rule.name)
                 }
             }
@@ -326,15 +372,26 @@ function Test-CaGcpLoggingSinks {
         $require = if ($bl.GCP.PSObject.Properties.Name -contains 'RequireCentralLogSink') { [bool]$bl.GCP.RequireCentralLogSink } else { $true }
         $r = Invoke-CaGcloudJson -Arguments @('logging', 'sinks', 'list', '--project', $project) -AllowFailure
         if (-not $r.Success) { throw $r.Text }
-        $count = @($r.Json).Count
+        $allSinks = @($r.Json | Where-Object { $_ })
+        $systemSinks = @($allSinks | Where-Object { [string]$_.name -in @('_Required', '_Default') })
+        $centralSinks = @($allSinks | Where-Object {
+            $name = [string]$_.name
+            $destination = [string]$_.destination
+            $disabled = ($_.PSObject.Properties.Name -contains 'disabled') -and [bool]$_.disabled
+            $localBucketPrefix = "logging.googleapis.com/projects/$project/locations/"
+            $name -notin @('_Required', '_Default') -and -not $disabled -and
+                -not [string]::IsNullOrWhiteSpace($destination) -and
+                -not $destination.StartsWith($localBucketPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        })
 
-        if ($count -gt 0) {
+        if ($centralSinks.Count -gt 0) {
             New-CaFinding -Service GCP -CheckId 'GCP-010' -Title 'Project logging sink configured' -Status Pass `
-                -Detail "$count logging sink(s) configured." -Evidence $r.Json
+                -Detail "$($centralSinks.Count) enabled user-defined export/central sink(s) configured; ignored $($systemSinks.Count) system sink(s)." `
+                -Evidence @{ CentralSinks=$centralSinks; SystemSinks=$systemSinks }
         }
         elseif ($require) {
             New-CaFinding -Service GCP -CheckId 'GCP-010' -Title 'Project logging sink configured' -Status Fail -Severity Low `
-                -Detail 'No project logging sink configured.' `
+                -Detail "No enabled user-defined export/central sink configured; $($systemSinks.Count) system sink(s) do not satisfy the baseline." `
                 -Recommendation 'Create sinks for central SIEM/storage retention where organization policy requires it.' `
                 -Reference 'https://cloud.google.com/logging/docs/export/configure_export_v2'
         }

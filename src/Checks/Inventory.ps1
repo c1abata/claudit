@@ -48,32 +48,33 @@ function Get-CaInventoryAwsAssets {
     if (-not (Get-Command -Name 'aws' -ErrorAction SilentlyContinue)) { return @($assets) }
 
     $buckets = Invoke-CaAwsJson -Arguments @('s3api', 'list-buckets') -AllowFailure
-    if ($buckets.Success) {
-        foreach ($b in @($buckets.Json.Buckets | Select-Object -First $MaxItems)) {
-            $assets.Add((New-CaInventoryAsset -Provider AWS -Type S3Bucket -Name $b.Name -Id $b.Name))
-        }
+    if (-not $buckets.Success) {
+        throw "AWS S3 inventory failed [$($buckets.State)]: $($buckets.Error)"
+    }
+    foreach ($b in @($buckets.Json.Buckets | Select-Object -First $MaxItems)) {
+        $assets.Add((New-CaInventoryAsset -Provider AWS -Type S3Bucket -Name $b.Name -Id $b.Name))
     }
 
-    $regions = @()
-    try { $regions = @(Get-CaAwsAuditRegions | Select-Object -First 20) }
-    catch { return @($assets) }
+    $regions = @(Get-CaAwsAuditRegions | Select-Object -First 20)
 
     foreach ($region in $regions) {
         if ($assets.Count -ge $MaxItems) { break }
         $ec2 = Invoke-CaAwsJson -Arguments @('ec2', 'describe-instances') -Region $region -AllowFailure
-        if ($ec2.Success) {
-            foreach ($res in @($ec2.Json.Reservations)) {
-                foreach ($inst in @($res.Instances)) {
-                    if ($assets.Count -ge $MaxItems) { break }
-                    $assets.Add((New-CaInventoryAsset -Provider AWS -Type EC2Instance -Name $inst.InstanceId -Id $inst.InstanceId -Region $region -PublicEndpoint $inst.PublicIpAddress))
-                }
+        if (-not $ec2.Success) {
+            throw "AWS EC2 inventory failed in $region [$($ec2.State)]: $($ec2.Error)"
+        }
+        foreach ($res in @($ec2.Json.Reservations)) {
+            foreach ($inst in @($res.Instances)) {
+                if ($assets.Count -ge $MaxItems) { break }
+                $assets.Add((New-CaInventoryAsset -Provider AWS -Type EC2Instance -Name $inst.InstanceId -Id $inst.InstanceId -Region $region -PublicEndpoint $inst.PublicIpAddress))
             }
         }
         $lambda = Invoke-CaAwsJson -Arguments @('lambda', 'list-functions') -Region $region -AllowFailure
-        if ($lambda.Success) {
-            foreach ($fn in @($lambda.Json.Functions | Select-Object -First ($MaxItems - $assets.Count))) {
-                $assets.Add((New-CaInventoryAsset -Provider AWS -Type LambdaFunction -Name $fn.FunctionName -Id $fn.FunctionArn -Region $region))
-            }
+        if (-not $lambda.Success) {
+            throw "AWS Lambda inventory failed in $region [$($lambda.State)]: $($lambda.Error)"
+        }
+        foreach ($fn in @($lambda.Json.Functions | Select-Object -First ($MaxItems - $assets.Count))) {
+            $assets.Add((New-CaInventoryAsset -Provider AWS -Type LambdaFunction -Name $fn.FunctionName -Id $fn.FunctionArn -Region $region))
         }
     }
     return @($assets)
@@ -86,10 +87,11 @@ function Get-CaInventoryAzureAssets {
     if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) { return @($assets) }
 
     $resources = Invoke-CaAzJson -Arguments @('resource', 'list') -AllowFailure
-    if ($resources.Success) {
-        foreach ($r in @($resources.Json | Select-Object -First $MaxItems)) {
-            $assets.Add((New-CaInventoryAsset -Provider Azure -Type $r.type -Name $r.name -Id $r.id -Region $r.location))
-        }
+    if (-not $resources.Success) {
+        throw "Azure resource inventory failed [$($resources.State)]: $($resources.Error)"
+    }
+    foreach ($r in @($resources.Json | Select-Object -First $MaxItems)) {
+        $assets.Add((New-CaInventoryAsset -Provider Azure -Type $r.type -Name $r.name -Id $r.id -Region $r.location))
     }
     return @($assets)
 }
@@ -108,12 +110,7 @@ function Get-CaInventoryGcpAssets {
         }
         return @($assets)
     }
-
-    foreach ($bucket in @(Get-CaGcpBuckets -Project $project | Select-Object -First $MaxItems)) {
-        $name = Get-CaGcpBucketName -Bucket $bucket
-        $assets.Add((New-CaInventoryAsset -Provider GCP -Type StorageBucket -Name $name -Id $name))
-    }
-    return @($assets)
+    throw "GCP Cloud Asset inventory failed [$($asset.State)]: $($asset.Error)"
 }
 
 function Get-CaInventoryTailscaleAssets {
@@ -150,18 +147,17 @@ function Test-CaInventoryAssets {
         }
 
         $byProvider = @($assets | Group-Object Provider | ForEach-Object { "$($_.Name)=$($_.Count)" })
-        if ($assets.Count -gt 0) {
-            $status = if ($errors.Count -gt 0) { 'Warning' } else { 'Info' }
-            $severity = if ($errors.Count -gt 0) { 'Low' } else { 'Info' }
-            New-CaFinding -Service Inventory -CheckId 'INV-001' -Title 'Multi-cloud asset inventory captured' -Status $status -Severity $severity `
-                -Detail "Assets=$($assets.Count); $($byProvider -join '; '); provider errors=$($errors.Count)." `
+        if ($errors.Count -gt 0) {
+            New-CaFinding -Service Inventory -CheckId 'INV-001' -Title 'Multi-cloud asset inventory captured' -Status Error -Severity High `
+                -Detail "Inventory is incomplete: assets=$($assets.Count); provider errors=$($errors.Count)." `
                 -Evidence @{ Assets = @($assets); Errors = @($errors) } `
-                -Recommendation 'Use the normalized asset evidence as the starting point for attack-surface review and drift comparisons.'
+                -Recommendation 'Restore provider authorization/connectivity and rerun; do not use this partial inventory as an audit baseline.'
         }
-        elseif ($errors.Count -gt 0) {
-            New-CaFinding -Service Inventory -CheckId 'INV-001' -Title 'Multi-cloud asset inventory captured' -Status Warning -Severity Low `
-                -Detail "No assets collected; provider errors=$($errors.Count)." -Evidence $errors `
-                -Recommendation 'Configure at least one provider CLI/API context before running Inventory.'
+        elseif ($assets.Count -gt 0) {
+            New-CaFinding -Service Inventory -CheckId 'INV-001' -Title 'Multi-cloud asset inventory captured' -Status Info -Severity Info `
+                -Detail "Assets=$($assets.Count); $($byProvider -join '; ')." `
+                -Evidence @{ Assets = @($assets); Errors = @() } `
+                -Recommendation 'Use the normalized asset evidence as the starting point for attack-surface review and drift comparisons.'
         }
         else {
             New-CaFinding -Service Inventory -CheckId 'INV-001' -Title 'Multi-cloud asset inventory captured' -Status Skipped `

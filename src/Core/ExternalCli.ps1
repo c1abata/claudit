@@ -34,6 +34,17 @@ function Assert-CaCliCommand {
     }
 }
 
+function Get-CaExternalFailureState {
+    param([AllowNull()][string]$Text)
+
+    $signal = [string]$Text
+    if ($signal -match '(?i)access.?denied|forbidden|unauthorized|insufficient.?permission|permission.?denied') { return 'Denied' }
+    if ($signal -match '(?i)throttl|rate.?limit|too many requests|\b429\b') { return 'RateLimited' }
+    if ($signal -match '(?i)timed?\s*out|timeout') { return 'Timeout' }
+    if ($signal -match '(?i)could not resolve|name resolution|connection refused|network is unreachable|service unavailable') { return 'Unavailable' }
+    return 'Failed'
+}
+
 function Invoke-CaExternalCommand {
     [CmdletBinding()]
     param(
@@ -49,6 +60,7 @@ function Invoke-CaExternalCommand {
 
     $result = [pscustomobject]@{
         Success  = ($exitCode -eq 0)
+        State    = if ($exitCode -eq 0) { 'Ok' } else { Get-CaExternalFailureState -Text $text }
         ExitCode = $exitCode
         Text     = $text
     }
@@ -75,7 +87,12 @@ function Invoke-CaExternalJson {
         catch {
             $joined = ConvertTo-CaRedactedText -Text ($Arguments -join ' ')
             $message = ConvertTo-CaRedactedText -Text $_.Exception.Message
-            throw "$Command returned non-JSON output for '$joined': $message"
+            if (-not $AllowFailure) {
+                throw "$Command returned non-JSON output for '$joined': $message"
+            }
+            $result.Success = $false
+            $result.State = 'Malformed'
+            $result.Text = "$Command returned non-JSON output for '$joined': $message"
         }
     }
 

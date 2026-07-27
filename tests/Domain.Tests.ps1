@@ -56,6 +56,27 @@ Describe 'Claudit DNS analyzers' {
             $query.Records[0].Data | Should -Be '192.0.2.10'
             $query.AuthenticatedData | Should -BeTrue
         }
+
+        It 'treats resolver SERVFAIL disagreement as indeterminate DNSSEC' {
+            Mock Invoke-CaDnsResolverQuery {
+                if ($Resolver -like '*cloudflare*') {
+                    return [pscustomobject]@{ Status='SERVFAIL'; AuthenticatedData=$false }
+                }
+                [pscustomobject]@{ Status='NOERROR'; AuthenticatedData=$true }
+            }
+
+            Resolve-CaDnssecStatus -Name 'example.com' | Should -Be 'Indeterminate'
+            Should -Invoke Invoke-CaDnsResolverQuery -Times 2
+        }
+
+        It 'requires validating agreement before marking DNSSEC secure' {
+            Mock Invoke-CaDnsResolverQuery {
+                [pscustomobject]@{ Status='NOERROR'; AuthenticatedData=$true }
+            }
+
+            Resolve-CaDnssecStatus -Name 'example.com' | Should -Be 'Secure'
+            Should -Invoke Invoke-CaDnsResolverQuery -Times 2
+        }
     }
 }
 

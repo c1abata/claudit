@@ -1,0 +1,16 @@
+{
+  "SchemaVersion": "1.0",
+  "Rules": [
+    {
+      "RuleId": "EXC-AWS-001",
+      "Enabled": false,
+      "CheckId": "AWS-006",
+      "FindingId": "claudit:0000000000000000000000000000000000000000000000000000000000000000",
+      "AllowBroad": false,
+      "Reason": "Approved temporary deviation with compensating monitoring.",
+      "Owner": "cloud-security",
+      "Ticket": "RISK-0001",
+      "ExpiresUtc": "2026-12-31T23:59:59Z"
+    }
+  ]
+}

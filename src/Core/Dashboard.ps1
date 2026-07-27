@@ -338,11 +338,64 @@ function New-CaDashboardProcessArgumentList {
     return $argList
 }
 
-function ConvertTo-CaDashboardProcessArgument {
-    param([Parameter(Mandatory)][string]$Argument)
+function New-CaDashboardProcessStartInfo {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
 
-    if ($Argument -notmatch '[\s"]') { return $Argument }
-    return '"' + ($Argument -replace '"', '\"') + '"'
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { $startInfo.ArgumentList.Add($argument) }
+    return $startInfo
+}
+
+function Start-CaDashboardChildProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$StandardOutputPath,
+        [Parameter(Mandatory)][string]$StandardErrorPath
+    )
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = New-CaDashboardProcessStartInfo -FilePath $FilePath -Arguments $Arguments
+    $standardOutput = [System.IO.File]::Create($StandardOutputPath)
+    $standardError = [System.IO.File]::Create($StandardErrorPath)
+    try {
+        if (-not $process.Start()) { throw "Failed to start dashboard child process '$FilePath'." }
+        $outputTransfer = $process.StandardOutput.BaseStream.CopyToAsync($standardOutput)
+        $errorTransfer = $process.StandardError.BaseStream.CopyToAsync($standardError)
+        return [pscustomobject]@{
+            Process=$process; OutputTransfer=$outputTransfer; ErrorTransfer=$errorTransfer
+            StandardOutput=$standardOutput; StandardError=$standardError; CaptureCompleted=$false
+        }
+    }
+    catch {
+        $standardOutput.Dispose()
+        $standardError.Dispose()
+        $process.Dispose()
+        throw
+    }
+}
+
+function Complete-CaDashboardChildProcessCapture {
+    param([Parameter(Mandatory)]$TrackedOperation)
+
+    if ($TrackedOperation.CaptureCompleted) { return }
+    try {
+        $TrackedOperation.OutputTransfer.GetAwaiter().GetResult()
+        $TrackedOperation.ErrorTransfer.GetAwaiter().GetResult()
+    }
+    finally {
+        $TrackedOperation.StandardOutput.Dispose()
+        $TrackedOperation.StandardError.Dispose()
+        $TrackedOperation.CaptureCompleted = $true
+    }
 }
 
 function Get-CaDashboardReportSummary {
@@ -356,18 +409,43 @@ function Get-CaDashboardReportSummary {
             $legacyError = [int](Get-CaDashboardProperty -Object $summary -Name Error -Default 0)
             $legacyFail = [int](Get-CaDashboardProperty -Object $summary -Name Fail -Default 0)
             $legacyWarning = [int](Get-CaDashboardProperty -Object $summary -Name Warning -Default 0)
-            $legacyOutcome = if ($legacyError -gt 0) { 'ExecutionError' } elseif ($legacyFail -gt 0) { 'IssuesFound' } elseif ($legacyWarning -gt 0) { 'Attention' } else { 'Pass' }
+            $legacySkipped = [int](Get-CaDashboardProperty -Object $summary -Name Skipped -Default 0)
+            $schemaVersion = [string](Get-CaDashboardProperty -Object $json -Name SchemaVersion -Default '1.0')
+            $derivedOutcome = if ($legacyError -gt 0) {
+                'ExecutionError'
+            }
+            elseif ($legacySkipped -gt 0) {
+                'Incomplete'
+            }
+            elseif ($legacyFail -gt 0) {
+                'IssuesFound'
+            }
+            elseif ($legacyWarning -gt 0) {
+                'Attention'
+            }
+            else {
+                'Pass'
+            }
+            # Schema v1 could label skipped-only runs Pass. Never carry that
+            # false-green state into the upgraded dashboard.
+            $outcome = if ($schemaVersion -notmatch '^2\.') {
+                $derivedOutcome
+            }
+            else {
+                [string](Get-CaDashboardProperty -Object $summary -Name Outcome -Default $derivedOutcome)
+            }
+            $legacyCoverage = if (($legacyError + $legacySkipped) -gt 0) { 0 } else { 100 }
             return [pscustomobject]@{
                 Kind         = 'audit'
-                Outcome      = [string](Get-CaDashboardProperty -Object $summary -Name Outcome -Default $legacyOutcome)
+                Outcome      = $outcome
                 Total        = [int](Get-CaDashboardProperty -Object $summary -Name Total -Default 0)
                 Pass         = [int](Get-CaDashboardProperty -Object $summary -Name Pass -Default 0)
                 Fail         = [int](Get-CaDashboardProperty -Object $summary -Name Fail -Default 0)
                 Warning      = [int](Get-CaDashboardProperty -Object $summary -Name Warning -Default 0)
                 Error        = [int](Get-CaDashboardProperty -Object $summary -Name Error -Default 0)
                 Problems     = [int](Get-CaDashboardProperty -Object $summary -Name ProblemsDetected -Default ($legacyFail + $legacyWarning))
-                NotEvaluated = [int](Get-CaDashboardProperty -Object $summary -Name NotEvaluated -Default $legacyError)
-                Coverage     = [double](Get-CaDashboardProperty -Object $summary -Name CoveragePercent -Default 100)
+                NotEvaluated = [int](Get-CaDashboardProperty -Object $summary -Name NotEvaluated -Default ($legacyError + $legacySkipped))
+                Coverage     = [double](Get-CaDashboardProperty -Object $summary -Name CoveragePercent -Default $legacyCoverage)
                 Critical     = [int](Get-CaDashboardProperty -Object $summary -Name Critical -Default 0)
                 High         = [int](Get-CaDashboardProperty -Object $summary -Name High -Default 0)
                 GeneratedUtc = [string](Get-CaDashboardProperty -Object $summary -Name GeneratedUtc -Default '')
@@ -454,6 +532,7 @@ function Get-CaDashboardOperationView {
                 $null
             }
             if ($proc -and $proc.HasExited) {
+                Complete-CaDashboardChildProcessCapture -TrackedOperation $script:CaDashboardOperations[$Operation.Id]
                 $exitCode = $proc.ExitCode
                 $status = if ($exitCode -eq 0) { 'Succeeded' } else { 'Failed' }
             }
@@ -557,8 +636,8 @@ function Start-CaDashboardOperation {
     $stderr = Join-Path $runRoot 'stderr.log'
     $pwsh = (Get-Process -Id $PID).Path
     if ([string]::IsNullOrWhiteSpace($pwsh) -or -not (Test-Path -LiteralPath $pwsh)) { $pwsh = 'pwsh' }
-    $argumentString = (@($argList | ForEach-Object { ConvertTo-CaDashboardProcessArgument $_ }) -join ' ')
-    $process = Start-Process -FilePath $pwsh -ArgumentList $argumentString -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    $trackedProcess = Start-CaDashboardChildProcess -FilePath $pwsh -Arguments @($argList) -StandardOutputPath $stdout -StandardErrorPath $stderr
+    $process = $trackedProcess.Process
 
     $meta = [pscustomobject]@{
         Id              = $runId
@@ -577,7 +656,8 @@ function Start-CaDashboardOperation {
         Arguments       = @($argList)
     }
     $meta | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runRoot 'metadata.json') -Encoding UTF8
-    $script:CaDashboardOperations[$runId] = [pscustomobject]@{ Meta = $meta; Process = $process }
+    $trackedProcess | Add-Member -NotePropertyName Meta -NotePropertyValue $meta
+    $script:CaDashboardOperations[$runId] = $trackedProcess
     Get-CaDashboardOperationView -Operation $meta
 }
 
@@ -646,7 +726,7 @@ function Get-CaDashboardHtml {
                 <div class="form-grid compact">
                   <label class="field"><span class="field-label">Mode</span><select id="opMode"><option value="preflight">Offline preflight</option><option value="safe">Guarded launcher</option><option value="audit">Direct read-only audit</option></select></label>
                   <label class="field"><span class="field-label">Control level</span><select id="controlLevel"><option>Formal</option><option selected>Passive</option><option>Active</option></select><span class="hint">Cumulative; Active is bounded and opt-in.</span></label>
-                  <label class="field"><span class="field-label">Report format</span><select id="format"><option>All</option><option>Html</option><option>Json</option><option>Markdown</option><option>Csv</option></select></label>
+                  <label class="field"><span class="field-label">Report format</span><select id="format"><option>All</option><option>Html</option><option>Json</option><option>Markdown</option><option>Csv</option><option>Ocsf</option><option>Oscal</option><option>Catalog</option></select></label>
                   <div class="field"><label class="field-label" for="retentionCount">Results to keep</label><div class="input-action"><input id="retentionCount" type="number" min="1" max="10000" list="retentionPresets" value="__CLAUDIT_RETENTION_COUNT__"><button id="saveRetention" type="button">Save</button></div><span class="hint">Completed runs only.</span><datalist id="retentionPresets"><option value="10"><option value="25"><option value="50"><option value="100"><option value="250"><option value="500"><option value="1000"></datalist></div>
                 </div>
               </div>

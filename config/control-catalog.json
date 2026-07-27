@@ -1,0 +1,1022 @@
+{
+  "CatalogVersion": "2026.07.0",
+  "GeneratedFrom": "config/control-catalog.json",
+  "CoverageModel": "Implemented Claudit checks; external mappings are cross-references, not certification coverage",
+  "FullFrameworkCoverage": false,
+  "DefaultControlLevel": "Passive",
+  "ControlLevelOverrides": {
+    "DOMAIN-001": "Formal",
+    "DOMAIN-002": "Formal",
+    "DOMAIN-003": "Formal",
+    "DOMAIN-004": "Formal",
+    "DOMAIN-005": "Formal",
+    "DOMAIN-006": "Formal",
+    "DOMAIN-008": "Active",
+    "DOMAIN-009": "Formal",
+    "DOMAIN-010": "Formal",
+    "DOMAIN-011": "Formal",
+    "DOMAIN-012": "Formal",
+    "DOMAIN-013": "Formal",
+    "DOMAIN-014": "Formal",
+    "DOMAIN-015": "Formal",
+    "VPS-007": "Active"
+  },
+  "Frameworks": [
+    {
+      "Id": "AWS",
+      "Name": "AWS",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "AWS-FSBP",
+      "Name": "AWS Foundational Security Best Practices",
+      "Revision": "provider-current",
+      "Assurance": "CrossReference"
+    },
+    {
+      "Id": "Azure",
+      "Name": "Azure",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Certificate",
+      "Name": "Certificate",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CIS",
+      "Name": "CIS Microsoft 365 Foundations Benchmark",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CIS-AWS",
+      "Name": "CIS AWS Foundations Benchmark",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CIS-Azure",
+      "Name": "CIS Microsoft Azure Foundations Benchmark",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CIS-GCP",
+      "Name": "CIS Google Cloud Platform Foundation Benchmark",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CIS-Linux",
+      "Name": "CIS Linux benchmarks",
+      "Revision": "distribution-specific",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "CISA",
+      "Name": "CISA SCuBA Secure Configuration Baselines",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Cloud",
+      "Name": "Cloud",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "DNS",
+      "Name": "DNS",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Engagement",
+      "Name": "Engagement",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Exchange",
+      "Name": "Exchange",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "GCP",
+      "Name": "GCP",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Host",
+      "Name": "Host",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "Mail",
+      "Name": "Mail",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "MITRE",
+      "Name": "MITRE ATT&CK",
+      "Revision": "not-pinned",
+      "Assurance": "CrossReference"
+    },
+    {
+      "Id": "Network",
+      "Name": "Network",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "NIST-CSF",
+      "Name": "NIST Cybersecurity Framework",
+      "Revision": "2.0",
+      "Assurance": "CrossReference"
+    },
+    {
+      "Id": "RFC",
+      "Name": "RFC",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "SOC2",
+      "Name": "AICPA Trust Services Criteria",
+      "Revision": "not-pinned",
+      "Assurance": "CrossReference"
+    },
+    {
+      "Id": "Tailscale",
+      "Name": "Tailscale",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    },
+    {
+      "Id": "TLS",
+      "Name": "TLS",
+      "Revision": "not-pinned",
+      "Assurance": "Indicative"
+    }
+  ],
+  "Controls": [
+    {
+      "CheckId": "AWS-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "AWS:Inventory"
+      ]
+    },
+    {
+      "CheckId": "AWS-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:1.5"
+      ]
+    },
+    {
+      "CheckId": "AWS-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:1.8"
+      ]
+    },
+    {
+      "CheckId": "AWS-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:3.1",
+        "AWS-FSBP:CloudTrail.1"
+      ]
+    },
+    {
+      "CheckId": "AWS-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "AWS-FSBP:GuardDuty.1"
+      ]
+    },
+    {
+      "CheckId": "AWS-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "AWS-FSBP:SecurityHub.1"
+      ]
+    },
+    {
+      "CheckId": "AWS-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:2.1.5",
+        "AWS-FSBP:S3.1"
+      ]
+    },
+    {
+      "CheckId": "AWS-008",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:1.14"
+      ]
+    },
+    {
+      "CheckId": "AWS-009",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "AWS-FSBP:EC2.7"
+      ]
+    },
+    {
+      "CheckId": "AWS-010",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:3.5"
+      ]
+    },
+    {
+      "CheckId": "AWS-011",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-AWS:3.9"
+      ]
+    },
+    {
+      "CheckId": "AZURE-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "Azure:Inventory"
+      ]
+    },
+    {
+      "CheckId": "AZURE-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Azure:5.1",
+        "MITRE:PrivilegeEscalation"
+      ]
+    },
+    {
+      "CheckId": "AZURE-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.5.1",
+        "CISA:MS.AAD.6.1"
+      ]
+    },
+    {
+      "CheckId": "AZURE-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Azure:3.1"
+      ]
+    },
+    {
+      "CheckId": "AZURE-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Azure:8.5"
+      ]
+    },
+    {
+      "CheckId": "AZURE-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "Azure:PublicExposure"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:GV.OC",
+        "Engagement:Scope"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:PR.DS",
+        "DNS:Delegation"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4",
+        "DNS:MX"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.1",
+        "DNS:SPF"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.3",
+        "DNS:DMARC"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "DNS:CAA",
+        "Certificate:Issuance"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "MITRE:T1580",
+        "Cloud:SubdomainTakeover"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-008",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:PR.DS",
+        "TLS:CertificateValidation"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-009",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "DNS:RCODE",
+        "NIST-CSF:DE.CM"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-010",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "RFC:1035",
+        "RFC:1912",
+        "DNS:SOA"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-011",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "RFC:4033",
+        "RFC:4034",
+        "RFC:4035",
+        "DNS:DNSSEC"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-012",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "RFC:7208",
+        "CISA:MS.EXO.4.1",
+        "DNS:SPF"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-013",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.3",
+        "DNS:DMARC"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-014",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "RFC:6376",
+        "CISA:MS.EXO.4.2",
+        "DNS:DKIM"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-015",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "RFC:8460",
+        "RFC:8461",
+        "Mail:TransportSecurity"
+      ]
+    },
+    {
+      "CheckId": "DOMAIN-016",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "MITRE:T1580",
+        "Cloud:SubdomainTakeover",
+        "DNS:Availability"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.3.1",
+        "CIS:5.2.2.1"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.7.1",
+        "CIS:5.1.1.1"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.1.1",
+        "CIS:5.2.2.3"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:5.1.2.2"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.8.1",
+        "CIS:5.1.6.1"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.5.1",
+        "CIS:5.1.5.2"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.6.1"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-008",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.8.3"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-009",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.3.1",
+        "CIS:5.2.2.2"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-010",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.3.2"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-011",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.3.2"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-012",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.3.3"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-013",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.AAD.5.4",
+        "CIS:5.1.5.1"
+      ]
+    },
+    {
+      "CheckId": "ENTRA-014",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:5.1.2.3"
+      ]
+    },
+    {
+      "CheckId": "EXO-000",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "Exchange:Preflight"
+      ]
+    },
+    {
+      "CheckId": "EXO-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:6.5.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.5.1",
+        "CIS:3.1.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.1.1",
+        "CIS:6.2.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.1.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.2",
+        "CIS:2.1.9"
+      ]
+    },
+    {
+      "CheckId": "EXO-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:6.5.2"
+      ]
+    },
+    {
+      "CheckId": "EXO-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:6.5.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-008",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.1.1"
+      ]
+    },
+    {
+      "CheckId": "EXO-009",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.7.1",
+        "CIS:2.1.7"
+      ]
+    },
+    {
+      "CheckId": "EXO-010",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.1",
+        "CIS:2.1.8"
+      ]
+    },
+    {
+      "CheckId": "EXO-011",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.EXO.4.3"
+      ]
+    },
+    {
+      "CheckId": "GCP-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "GCP:Inventory"
+      ]
+    },
+    {
+      "CheckId": "GCP-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:1.3"
+      ]
+    },
+    {
+      "CheckId": "GCP-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:1.6"
+      ]
+    },
+    {
+      "CheckId": "GCP-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:2.1"
+      ]
+    },
+    {
+      "CheckId": "GCP-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:5.1"
+      ]
+    },
+    {
+      "CheckId": "GCP-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "GCP:StorageUniformAccess"
+      ]
+    },
+    {
+      "CheckId": "GCP-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:3.1"
+      ]
+    },
+    {
+      "CheckId": "GCP-008",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:3.6",
+        "CIS-GCP:3.7"
+      ]
+    },
+    {
+      "CheckId": "GCP-009",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-GCP:4.4"
+      ]
+    },
+    {
+      "CheckId": "GCP-010",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "GCP:LoggingSink"
+      ]
+    },
+    {
+      "CheckId": "INV-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:ID.AM",
+        "NIST-CSF:GV.OC"
+      ]
+    },
+    {
+      "CheckId": "OD-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:7.2.2"
+      ]
+    },
+    {
+      "CheckId": "OD-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:7.2.1"
+      ]
+    },
+    {
+      "CheckId": "OD-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS:1.3.3"
+      ]
+    },
+    {
+      "CheckId": "SPO-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.SHAREPOINT.1.1",
+        "CIS:7.2.3"
+      ]
+    },
+    {
+      "CheckId": "SPO-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.SHAREPOINT.3.1"
+      ]
+    },
+    {
+      "CheckId": "SPO-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.SHAREPOINT.1.3"
+      ]
+    },
+    {
+      "CheckId": "SPO-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CISA:MS.SHAREPOINT.1.2",
+        "CIS:7.2.6"
+      ]
+    },
+    {
+      "CheckId": "TAILSCALE-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "Tailscale:Inventory"
+      ]
+    },
+    {
+      "CheckId": "TAILSCALE-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "SOC2:CC6.2",
+        "Tailscale:DeviceLifecycle"
+      ]
+    },
+    {
+      "CheckId": "TAILSCALE-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "SOC2:CC6.1",
+        "Tailscale:AuthKeys"
+      ]
+    },
+    {
+      "CheckId": "TAILSCALE-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "SOC2:CC6.6",
+        "Tailscale:AccessPolicy"
+      ]
+    },
+    {
+      "CheckId": "VPS-001",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:ID.AM",
+        "Host:Inventory"
+      ]
+    },
+    {
+      "CheckId": "VPS-002",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Linux:SSH",
+        "MITRE:InitialAccess"
+      ]
+    },
+    {
+      "CheckId": "VPS-003",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Linux:NetworkServices",
+        "MITRE:T1046"
+      ]
+    },
+    {
+      "CheckId": "VPS-004",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Linux:Firewall",
+        "NIST-CSF:PR.PT"
+      ]
+    },
+    {
+      "CheckId": "VPS-005",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Linux:PatchManagement",
+        "NIST-CSF:PR.IP"
+      ]
+    },
+    {
+      "CheckId": "VPS-006",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "CIS-Linux:Logging",
+        "NIST-CSF:DE.CM"
+      ]
+    },
+    {
+      "CheckId": "VPS-007",
+      "ImplementationStatus": "Automated",
+      "Applicability": "Selected service/provider scope and configured baseline",
+      "EvidenceRequirement": "One normalized finding with redacted observed evidence or an explicit evaluation error",
+      "Mappings": [
+        "NIST-CSF:ID.AM",
+        "Network:ReachabilityValidation"
+      ]
+    }
+  ],
+  "KnownGaps": [
+    "External framework revisions marked not-pinned require a licensed or authoritative catalog snapshot before certification use.",
+    "Manual and zero-check requirements from complete external catalogs are not represented.",
+    "Applicability and shared-responsibility decisions remain operator-owned."
+  ]
+}

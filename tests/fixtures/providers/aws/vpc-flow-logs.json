@@ -1,0 +1,28 @@
+{
+  "Cases": [
+    {
+      "Name": "compliant",
+      "Snapshot": { "Regions": ["eu-west-1"], "QueriedVpcs": 2, "Missing": [], "Errors": [] },
+      "ExpectedStatus": "Pass",
+      "ExpectedFailureCategory": "None"
+    },
+    {
+      "Name": "non-compliant",
+      "Snapshot": { "Regions": ["eu-west-1"], "QueriedVpcs": 2, "Missing": ["eu-west-1/vpc-2"], "Errors": [] },
+      "ExpectedStatus": "Fail",
+      "ExpectedFailureCategory": "None"
+    },
+    {
+      "Name": "no-resources",
+      "Snapshot": { "Regions": ["eu-west-1"], "QueriedVpcs": 0, "Missing": [], "Errors": [] },
+      "ExpectedStatus": "NotApplicable",
+      "ExpectedFailureCategory": "None"
+    },
+    {
+      "Name": "provider-denied",
+      "Snapshot": { "Regions": ["eu-west-1"], "QueriedVpcs": 0, "Missing": [], "Errors": ["eu-west-1/vpcs: AccessDenied"] },
+      "ExpectedStatus": "Error",
+      "ExpectedFailureCategory": "Authorization"
+    }
+  ]
+}

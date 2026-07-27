@@ -12,11 +12,12 @@
 param(
     [string[]]$Service = @('Entra', 'Exchange', 'SharePoint', 'OneDrive'),
 
-    [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'All')]
+    [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'Ocsf', 'Oscal', 'Catalog', 'All')]
     [string]$Format = 'All',
 
     [string]$TenantName = 'Cloud tenant',
     [string]$BaselinePath,
+    [string]$ExceptionPath,
     [string]$OutputDirectory,
     [ValidateSet('Formal', 'Passive', 'Active')]
     [string]$ControlLevel = 'Passive',
@@ -153,7 +154,7 @@ function Invoke-IsolatedAuditProcess {
 
     foreach ($name in @(
         'Service', 'Format', 'TenantName', 'OutputDirectory', 'Environment',
-        'GraphAuthMode', 'BaselinePath', 'ControlLevel', 'ActiveTimeoutMs',
+        'GraphAuthMode', 'BaselinePath', 'ExceptionPath', 'ControlLevel', 'ActiveTimeoutMs',
         'VpsProbePort', 'CompareWith', 'NotifyWebhook',
         'NotifyType', 'AzureSubscription', 'AzureTenant', 'AwsProfile',
         'AwsRegion', 'GcpProject', 'GcpAccount', 'GcpOrganization',
@@ -260,6 +261,7 @@ $auditArgs = @{
 if ($VpsProbePort) { $auditArgs['VpsProbePort'] = $VpsProbePort }
 if ($ConfirmActiveProbes) { $auditArgs['ConfirmActiveProbes'] = $true }
 if ($BaselinePath) { $auditArgs['BaselinePath'] = $BaselinePath }
+if ($ExceptionPath) { $auditArgs['ExceptionPath'] = $ExceptionPath }
 if ($RunPester) { $auditArgs['RunPester'] = $true }
 if ($GraphAuthMode) { $auditArgs['GraphAuthMode'] = $GraphAuthMode }
 if ($AzureSubscription) { $auditArgs['AzureSubscription'] = $AzureSubscription }

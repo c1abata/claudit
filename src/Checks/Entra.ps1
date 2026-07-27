@@ -6,29 +6,103 @@
     failure degrades to an Error finding instead of aborting the audit.
 #>
 
+function Test-CaConditionalAccessCoversAllUsersAndApps {
+    param([Parameter(Mandatory)]$Policy)
+
+    $users = $Policy.Conditions.Users
+    $apps = $Policy.Conditions.Applications
+    if ($null -eq $users -or $null -eq $apps) { return $false }
+
+    $allUsers = @($users.IncludeUsers) -contains 'All'
+    $allApps = @($apps.IncludeApplications) -contains 'All'
+    $hasExclusions = @($users.ExcludeUsers).Count -gt 0 -or
+        @($users.ExcludeGroups).Count -gt 0 -or
+        @($users.ExcludeRoles).Count -gt 0 -or
+        @($apps.ExcludeApplications).Count -gt 0
+    return $allUsers -and $allApps -and -not $hasExclusions
+}
+
+function Test-CaConditionalAccessRequiresMfa {
+    param([Parameter(Mandatory)]$Policy)
+
+    $controls = @($Policy.GrantControls.BuiltInControls)
+    return ($controls -contains 'mfa') -or
+        ($controls -contains 'authenticationStrength') -or
+        ($null -ne $Policy.GrantControls.AuthenticationStrength)
+}
+
+function Get-CaBroadMfaPolicies {
+    param([Parameter(Mandatory)][object[]]$Policies)
+
+    @($Policies | Where-Object {
+        $_.State -eq 'enabled' -and
+        (Test-CaConditionalAccessCoversAllUsersAndApps -Policy $_) -and
+        (Test-CaConditionalAccessRequiresMfa -Policy $_)
+    })
+}
+
 function Test-CaEntraSecurityBaseline {
     Invoke-CaCheck -Service Entra -CheckId 'ENTRA-001' -Title 'Security Defaults or Conditional Access enforced' -Body {
         Assert-CaGraph
         $bl = Get-CaBaseline
         $sd = Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy -ErrorAction Stop
-        $caCount = 0
+        $policies = @()
+        $broadMfa = @()
         if (-not $sd.IsEnabled) {
-            $caCount = @(Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop | Where-Object { $_.State -eq 'enabled' }).Count
+            $policies = @(Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop)
+            $broadMfa = @(Get-CaBroadMfaPolicies -Policies $policies)
         }
 
-        $protected = $sd.IsEnabled -or $caCount -gt 0
         if (-not $bl.Entra.RequireSecurityDefaultsOrConditionalAccess) {
             return New-CaFinding -Service Entra -CheckId 'ENTRA-001' -Title 'Security Defaults or Conditional Access enforced' -Status Info -Detail 'Baseline does not require this control.'
         }
-        if ($protected) {
+        if ($sd.IsEnabled -or $broadMfa.Count -gt 0) {
             New-CaFinding -Service Entra -CheckId 'ENTRA-001' -Title 'Security Defaults or Conditional Access enforced' -Status Pass `
-                -Detail "Security Defaults enabled=$($sd.IsEnabled); enabled CA policies=$caCount." -Evidence $sd.IsEnabled
+                -Detail "Security Defaults enabled=$($sd.IsEnabled); broad MFA CA policies=$($broadMfa.Count)." `
+                -Evidence @{ SecurityDefaults=[bool]$sd.IsEnabled; BroadMfaPolicies=@($broadMfa.DisplayName) }
+        }
+        elseif (@($policies | Where-Object State -eq 'enabled').Count -gt 0) {
+            New-CaFinding -Service Entra -CheckId 'ENTRA-001' -Title 'Security Defaults or Conditional Access enforced' -Status Investigate -Severity High `
+                -Detail 'Enabled Conditional Access policies exist, but static scope analysis did not prove tenant-wide MFA coverage without exclusions.' `
+                -Evidence @($policies | Where-Object State -eq 'enabled' | Select-Object DisplayName, State) `
+                -Recommendation 'Validate representative administrative and user sign-in scenarios with the Microsoft Graph Conditional Access evaluate API.'
         }
         else {
             New-CaFinding -Service Entra -CheckId 'ENTRA-001' -Title 'Security Defaults or Conditional Access enforced' -Status Fail -Severity Critical `
                 -Detail 'Neither Security Defaults nor any enabled Conditional Access policy is present.' `
                 -Recommendation 'Enable Security Defaults, or deploy Conditional Access requiring MFA.' `
                 -Reference 'https://learn.microsoft.com/entra/fundamentals/security-defaults'
+        }
+    }
+}
+
+function Test-CaEntraAdminMfaCoverage {
+    Invoke-CaCheck -Service Entra -CheckId 'ENTRA-009' -Title 'Administrative access requires MFA' -Body {
+        Assert-CaGraph
+        $bl = Get-CaBaseline
+        if (-not [bool]$bl.Entra.RequireMfaForAdmins) {
+            return New-CaFinding -Service Entra -CheckId 'ENTRA-009' -Title 'Administrative access requires MFA' -Status Info -Detail 'Baseline does not require this control.'
+        }
+
+        $sd = Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy -ErrorAction Stop
+        if ($sd.IsEnabled) {
+            return New-CaFinding -Service Entra -CheckId 'ENTRA-009' -Title 'Administrative access requires MFA' -Status Pass `
+                -Detail 'Security Defaults is enabled and requires privileged roles to use MFA.' -Evidence $true
+        }
+
+        $policies = @(Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop)
+        $broadMfa = @(Get-CaBroadMfaPolicies -Policies $policies)
+        if ($broadMfa.Count -gt 0) {
+            New-CaFinding -Service Entra -CheckId 'ENTRA-009' -Title 'Administrative access requires MFA' -Status Pass `
+                -Detail "$($broadMfa.Count) enabled policy/policies require MFA for all users and applications without exclusions." `
+                -Evidence @($broadMfa.DisplayName)
+        }
+        else {
+            New-CaFinding -Service Entra -CheckId 'ENTRA-009' -Title 'Administrative access requires MFA' -Status Investigate -Severity Critical `
+                -Detail 'Static policy inspection did not prove complete administrative MFA coverage.' `
+                -Evidence @($policies | Where-Object State -eq 'enabled' | Select-Object DisplayName, State) `
+                -Recommendation 'Run Conditional Access evaluate scenarios for every active privileged role member and document approved break-glass exclusions.' `
+                -Reference 'https://learn.microsoft.com/graph/api/conditionalaccessroot-evaluate?view=graph-rest-1.0'
         }
     }
 }
@@ -67,16 +141,30 @@ function Test-CaEntraLegacyAuthBlocked {
         if (-not $bl.Entra.BlockLegacyAuthentication) {
             return New-CaFinding -Service Entra -CheckId 'ENTRA-003' -Title 'Legacy authentication blocked by Conditional Access' -Status Info -Detail 'Baseline does not require this control.'
         }
-        $policies = Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop
-        $blocking = $policies | Where-Object {
+        $sd = Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy -ErrorAction Stop
+        if ($sd.IsEnabled) {
+            return New-CaFinding -Service Entra -CheckId 'ENTRA-003' -Title 'Legacy authentication blocked by Conditional Access' -Status Pass `
+                -Detail 'Security Defaults is enabled and blocks legacy authentication.' -Evidence $true
+        }
+
+        $policies = @(Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop)
+        $candidates = @($policies | Where-Object {
             $_.State -eq 'enabled' -and
             $_.Conditions.ClientAppTypes -and
-            ($_.Conditions.ClientAppTypes -contains 'exchangeActiveSync' -or $_.Conditions.ClientAppTypes -contains 'other') -and
+            ($_.Conditions.ClientAppTypes -contains 'exchangeActiveSync') -and
+            ($_.Conditions.ClientAppTypes -contains 'other') -and
             $_.GrantControls.BuiltInControls -contains 'block'
-        }
+        })
+        $blocking = @($candidates | Where-Object { Test-CaConditionalAccessCoversAllUsersAndApps -Policy $_ })
         if ($blocking) {
             New-CaFinding -Service Entra -CheckId 'ENTRA-003' -Title 'Legacy authentication blocked by Conditional Access' -Status Pass `
                 -Detail "Found $($blocking.Count) enabled CA policy blocking legacy clients." -Evidence ($blocking.DisplayName -join '; ')
+        }
+        elseif ($candidates.Count -gt 0) {
+            New-CaFinding -Service Entra -CheckId 'ENTRA-003' -Title 'Legacy authentication blocked by Conditional Access' -Status Investigate -Severity High `
+                -Detail 'Legacy-auth blocking policies exist, but scope or exclusions prevent proof of complete user/application coverage.' `
+                -Evidence @($candidates.DisplayName) `
+                -Recommendation 'Remove unintended exclusions or validate every excluded identity/application as an approved exception.'
         }
         else {
             New-CaFinding -Service Entra -CheckId 'ENTRA-003' -Title 'Legacy authentication blocked by Conditional Access' -Status Fail -Severity High `

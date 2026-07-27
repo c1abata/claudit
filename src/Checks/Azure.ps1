@@ -49,6 +49,31 @@ function Invoke-CaAzRestJson {
     Invoke-CaExternalJson -Command 'az' -Arguments @('rest', '--method', 'get', '--url', $Uri, '--output', 'json') -AllowFailure:$AllowFailure
 }
 
+function Invoke-CaAzGraphCollection {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri)
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $next = $Uri
+    $page = 0
+    do {
+        $page++
+        if ($page -gt 1000) { throw "Azure Graph pagination exceeded 1000 pages for '$Uri'." }
+        $result = Invoke-CaAzRestJson -Uri $next -AllowFailure
+        if (-not $result.Success) { return $result }
+        if ($null -eq $result.Json -or $result.Json.PSObject.Properties.Name -notcontains 'value') {
+            return [pscustomobject]@{ Success=$false; State='Malformed'; Text="Graph collection response has no value array at page $page."; Json=$null }
+        }
+        foreach ($item in @($result.Json.value)) { if ($null -ne $item) { $items.Add($item) } }
+        $next = if ($result.Json.PSObject.Properties.Name -contains '@odata.nextLink') { [string]$result.Json.'@odata.nextLink' } else { '' }
+    } while (-not [string]::IsNullOrWhiteSpace($next))
+
+    [pscustomobject]@{
+        Success=$true; State='Ok'; Text=''; ExitCode=0
+        Json=[pscustomobject]@{ value=@($items); PageCount=$page }
+    }
+}
+
 function Get-CaAzureAccount {
     $account = Invoke-CaAzJson -Arguments @('account', 'show')
     if (-not $account) { throw 'Azure CLI account context is empty. Run az login first.' }
@@ -162,7 +187,7 @@ function Test-CaAzureGraphApplicationPermissions {
         foreach ($sp in @($spResult.Json)) {
             if ([string]::IsNullOrWhiteSpace([string]$sp.id)) { continue }
             $uri = "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments"
-            $assignments = Invoke-CaAzRestJson -Uri $uri -AllowFailure
+            $assignments = Invoke-CaAzGraphCollection -Uri $uri
             if (-not $assignments.Success) {
                 if ($errors.Count -lt 10) { $errors.Add("$($sp.displayName): $($assignments.Text)") }
                 continue
@@ -182,14 +207,12 @@ function Test-CaAzureGraphApplicationPermissions {
             }
         }
 
-        if ($offenders.Count -eq 0 -and $errors.Count -eq 0) {
+        if ($errors.Count -gt 0) {
+            throw "Microsoft Graph application permissions could not be completely evaluated: $($errors -join ' | ')"
+        }
+        if ($offenders.Count -eq 0) {
             New-CaFinding -Service Azure -CheckId 'AZURE-003' -Title 'Application permissions avoid high-risk Microsoft Graph roles' -Status Pass `
                 -Detail 'No high-risk Microsoft Graph application permissions found on service principals.' -Evidence $offenders
-        }
-        elseif ($offenders.Count -eq 0) {
-            New-CaFinding -Service Azure -CheckId 'AZURE-003' -Title 'Application permissions avoid high-risk Microsoft Graph roles' -Status Warning -Severity Low `
-                -Detail "No high-risk Graph roles found, but $($errors.Count) service principal assignment read(s) failed." -Evidence $errors `
-                -Recommendation 'Grant directory read visibility or review failed service principals manually.'
         }
         else {
             New-CaFinding -Service Azure -CheckId 'AZURE-003' -Title 'Application permissions avoid high-risk Microsoft Graph roles' -Status Fail -Severity High `

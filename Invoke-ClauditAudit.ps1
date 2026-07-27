@@ -20,6 +20,9 @@
 .PARAMETER CompareWith
     Path to a previous Claudit JSON report; prints a drift summary (regressions/fixes).
 
+.PARAMETER ExceptionPath
+    Path to a governed JSON exception policy applied at report time.
+
 .PARAMETER NotifyWebhook
     Teams/Slack incoming-webhook URL to post the summary to.
 
@@ -38,9 +41,10 @@ param(
     [string[]]$Service = @('Entra', 'Exchange', 'SharePoint', 'OneDrive'),
 
     [string]$OutputDirectory,
-    [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'All')][string]$Format = 'All',
+    [ValidateSet('Html', 'Json', 'Markdown', 'Csv', 'Ocsf', 'Oscal', 'Catalog', 'All')][string]$Format = 'All',
     [string]$TenantName = 'Cloud tenant',
     [string]$BaselinePath,
+    [string]$ExceptionPath,
     [ValidateSet('Formal', 'Passive', 'Active')][string]$ControlLevel = 'Passive',
     [int[]]$VpsProbePort = @(),
     [ValidateRange(250, 10000)][int]$ActiveTimeoutMs = 3000,
@@ -229,16 +233,17 @@ try {
         throw 'No findings were produced. Check selected services and connection prerequisites.'
     }
 
-    $report = $findings | New-CaReport -OutputDirectory $OutputDirectory -Format $Format -TenantName $TenantName
+    $report = $findings | New-CaReport -OutputDirectory $OutputDirectory -Format $Format -TenantName $TenantName -ExceptionPath $ExceptionPath `
+        -ExpectedService $Service -ExpectedControlLevel $ControlLevel
     if (-not $report) {
         throw 'Report generation returned no output.'
     }
     $s = $report.Summary
 
     Write-Host ''
-    $outcomeColor = if ($s.Outcome -eq 'ExecutionError') { 'Red' } elseif ($s.Outcome -eq 'IssuesFound') { 'Yellow' } elseif ($s.Outcome -eq 'Attention') { 'DarkYellow' } else { 'Green' }
-    Write-Host ("Outcome {0} | coverage {1}% ({2}/{3})" -f $s.Outcome, $s.CoveragePercent, $s.Evaluated, $s.Total) -ForegroundColor $outcomeColor
-    Write-Host ("Problems {0} | Fail {1} | Warning {2} | Investigate {3} | Execution errors {4} | Skipped {5}" -f $s.ProblemsDetected, $s.Fail, $s.Warning, $s.Investigate, $s.BlockingErrors, $s.Skipped)
+    $outcomeColor = if ($s.Outcome -eq 'ExecutionError') { 'Red' } elseif ($s.Outcome -eq 'Incomplete') { 'DarkYellow' } elseif ($s.Outcome -eq 'IssuesFound') { 'Yellow' } elseif ($s.Outcome -eq 'Attention') { 'DarkYellow' } else { 'Green' }
+    Write-Host ("Outcome {0} | coverage {1}% ({2}/{3})" -f $s.Outcome, $s.CoveragePercent, $s.Evaluated, $s.Applicable) -ForegroundColor $outcomeColor
+    Write-Host ("Problems {0} | Suppressed {1} | Fail {2} | Warning {3} | Investigate {4} | Execution errors {5} | Skipped {6}" -f $s.ProblemsDetected, $s.Suppressed, $s.Fail, $s.Warning, $s.Investigate, $s.BlockingErrors, $s.Skipped)
     Write-Host ("Risk severity -> Critical {0} | High {1} | Medium {2} | Low {3}" -f $s.Critical, $s.High, $s.Medium, $s.Low) -ForegroundColor Yellow
     if ($report.Problems.Count -gt 0) {
         Write-Host ''
@@ -287,8 +292,10 @@ try {
             try {
                 $env:CLAUDIT_FINDINGS = $latestJson
                 $testDir = Join-Path $PSScriptRoot 'tests'
-                if (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version.Major -ge 5 }) {
-                    Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
+                $dependencyLock = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot 'config\dependencies.psd1')
+                $pesterVersion = [string]$dependencyLock.PowerShellModules.Pester
+                if (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq ([version]$pesterVersion)) {
+                    Import-Module Pester -RequiredVersion $pesterVersion -ErrorAction Stop
                     $pesterResult = Invoke-Pester -Path $testDir -Output Detailed -PassThru
                     if ($pesterResult.FailedCount -gt 0) {
                         $pesterFailed = $true
@@ -297,7 +304,7 @@ try {
                 }
                 else {
                     $pesterFailed = $true
-                    Write-Warning 'Pester 5+ not installed; skipping test run. Install-Module Pester -Scope CurrentUser'
+                    Write-Warning "Pester $pesterVersion is not installed; skipping test run. Run .\Install-ClauditPrerequisites.ps1 -IncludePester -ConfirmInstall"
                 }
             }
             finally {

@@ -1,0 +1,173 @@
+{
+  "CatalogVersion": "2026.07.0",
+  "GeneratedFrom": "config/check-metadata.json",
+  "CoverageModel": "Every production CheckId is assigned exactly one reusable risk profile; narrow per-check overrides carry exceptional severity, risk or relationships.",
+  "Profiles": [
+    {
+      "Name": "inventory-context",
+      "DefaultSeverity": "Info",
+      "Categories": ["inventory", "asset-management"],
+      "Threats": ["visibility-gap", "scope-drift"],
+      "Description": "Resolves the provider, tenant, host or asset scope needed for a trustworthy assessment.",
+      "Risk": "Missing or partial context creates blind spots, invalid comparisons and false confidence in audit coverage.",
+      "Remediation": "Restore least-privilege read access, verify the selected scope and rerun before treating the report as authoritative."
+    },
+    {
+      "Name": "scope-governance",
+      "DefaultSeverity": "High",
+      "Categories": ["scope", "governance"],
+      "Threats": ["unauthorized-targeting", "coverage-gap"],
+      "Description": "Constrains assessment targets to explicit, authorized scope.",
+      "Risk": "An implicit or malformed scope can test unauthorized assets or omit assets that the operator intended to assess.",
+      "Remediation": "Declare exact authorized targets, review the scope plan and rerun without wildcards or inferred assets."
+    },
+    {
+      "Name": "identity-access",
+      "DefaultSeverity": "High",
+      "Categories": ["identity-access", "least-privilege"],
+      "Threats": ["account-takeover", "privilege-escalation", "credential-abuse"],
+      "Description": "Evaluates authentication strength, credential lifecycle and privilege boundaries.",
+      "Risk": "Weak authentication or excessive privilege can allow account takeover, persistent administrative access and cross-service compromise.",
+      "Remediation": "Enforce phishing-resistant authentication, remove standing privilege and replace long-lived credentials with managed short-lived identities."
+    },
+    {
+      "Name": "logging-detection",
+      "DefaultSeverity": "Medium",
+      "Categories": ["logging", "detection", "forensics-ready"],
+      "Threats": ["defense-evasion", "detection-gap", "evidence-loss"],
+      "Description": "Evaluates telemetry collection, security detections and evidence availability.",
+      "Risk": "Missing telemetry delays detection, prevents reliable investigation and lets malicious activity blend into normal operations.",
+      "Remediation": "Enable the native audit source, centralize protected retention and verify that the SOC can query representative events."
+    },
+    {
+      "Name": "data-protection",
+      "DefaultSeverity": "High",
+      "Categories": ["data-protection", "encryption"],
+      "Threats": ["data-exposure", "data-loss", "destructive-impact"],
+      "Description": "Evaluates public access, encryption, retention and sharing controls around cloud data.",
+      "Risk": "Weak data controls can expose sensitive content, enable destructive changes or prevent recovery and legal retention.",
+      "Remediation": "Remove unintended public access, enforce encryption and apply retention and sharing policy at the broadest safe scope."
+    },
+    {
+      "Name": "network-security",
+      "DefaultSeverity": "High",
+      "Categories": ["network-security", "internet-exposed", "trust-boundaries"],
+      "Threats": ["external-exposure", "lateral-movement", "service-takeover"],
+      "Description": "Evaluates DNS, routing, listener, firewall and overlay-network trust boundaries.",
+      "Risk": "Uncontrolled exposure or broken naming and trust boundaries can enable takeover, unauthorized access and lateral movement.",
+      "Remediation": "Restrict exposure to explicit sources and services, remove stale references and validate layered network enforcement."
+    },
+    {
+      "Name": "email-security",
+      "DefaultSeverity": "Medium",
+      "Categories": ["email-security", "anti-spoofing"],
+      "Threats": ["phishing", "domain-spoofing", "mail-exfiltration"],
+      "Description": "Evaluates mail authentication, forwarding and legacy protocol controls.",
+      "Risk": "Weak mail controls enable spoofing, credential phishing, covert forwarding and abuse of legacy authentication paths.",
+      "Remediation": "Enforce SPF, DKIM and DMARC, block unintended forwarding and disable legacy mail protocols unless explicitly required."
+    },
+    {
+      "Name": "platform-hardening",
+      "DefaultSeverity": "Medium",
+      "Categories": ["host-hardening", "vulnerability-management"],
+      "Threats": ["exploitation", "persistence", "known-vulnerability"],
+      "Description": "Evaluates operating-system hardening and patch hygiene.",
+      "Risk": "Unpatched or weakly hardened hosts increase exploitability and give attackers durable local persistence.",
+      "Remediation": "Apply security updates within the maintenance policy and verify host controls after reboot or configuration reload."
+    }
+  ],
+  "Assignments": [
+    {
+      "Profile": "inventory-context",
+      "CheckIds": ["AWS-001", "AZURE-001", "AZURE-006", "ENTRA-008", "EXO-000", "GCP-001", "INV-001", "TAILSCALE-001", "VPS-001"]
+    },
+    {
+      "Profile": "scope-governance",
+      "CheckIds": ["DOMAIN-001"]
+    },
+    {
+      "Profile": "identity-access",
+      "CheckIds": ["AWS-002", "AWS-003", "AWS-008", "AZURE-002", "AZURE-003", "ENTRA-001", "ENTRA-002", "ENTRA-003", "ENTRA-004", "ENTRA-005", "ENTRA-006", "ENTRA-007", "ENTRA-009", "ENTRA-010", "ENTRA-011", "ENTRA-012", "ENTRA-013", "ENTRA-014", "EXO-001", "GCP-002", "GCP-003", "GCP-009", "OD-001", "SPO-002", "TAILSCALE-003", "VPS-002"]
+    },
+    {
+      "Profile": "logging-detection",
+      "CheckIds": ["AWS-004", "AWS-005", "AWS-006", "AWS-010", "AWS-011", "EXO-002", "GCP-004", "GCP-010", "VPS-006"]
+    },
+    {
+      "Profile": "data-protection",
+      "CheckIds": ["AWS-007", "AWS-009", "AZURE-004", "AZURE-005", "GCP-005", "GCP-006", "OD-002", "OD-003", "SPO-001", "SPO-003", "SPO-004"]
+    },
+    {
+      "Profile": "network-security",
+      "CheckIds": ["DOMAIN-002", "DOMAIN-006", "DOMAIN-007", "DOMAIN-008", "DOMAIN-009", "DOMAIN-010", "DOMAIN-011", "DOMAIN-016", "GCP-007", "GCP-008", "TAILSCALE-002", "TAILSCALE-004", "VPS-003", "VPS-004", "VPS-007"]
+    },
+    {
+      "Profile": "email-security",
+      "CheckIds": ["DOMAIN-003", "DOMAIN-004", "DOMAIN-005", "DOMAIN-012", "DOMAIN-013", "DOMAIN-014", "DOMAIN-015", "EXO-003", "EXO-004", "EXO-005", "EXO-006", "EXO-007", "EXO-008", "EXO-009", "EXO-010", "EXO-011"]
+    },
+    {
+      "Profile": "platform-hardening",
+      "CheckIds": ["VPS-005"]
+    }
+  ],
+  "Overrides": [
+    {
+      "CheckId": "AWS-002",
+      "DefaultSeverity": "Critical",
+      "Threats": ["root-account-takeover", "privilege-escalation"],
+      "Risk": "Compromise of an AWS root identity without MFA gives an attacker unrestricted account control, including billing, identity and destructive actions.",
+      "Remediation": "Enable hardware or FIDO2 MFA for root, remove root access keys and use IAM Identity Center for administrative work."
+    },
+    {
+      "CheckId": "ENTRA-009",
+      "DefaultSeverity": "Critical",
+      "Threats": ["privileged-account-takeover", "mfa-bypass"],
+      "Risk": "A privileged identity outside effective MFA coverage can be used to seize the tenant and weaken downstream controls.",
+      "Remediation": "Require phishing-resistant MFA for every privileged role, validate Conditional Access coverage and tightly govern break-glass exclusions.",
+      "RelatedTo": ["ENTRA-001", "ENTRA-010", "ENTRA-011"]
+    },
+    {
+      "CheckId": "TAILSCALE-004",
+      "DefaultSeverity": "Critical",
+      "Threats": ["overlay-network-lateral-movement", "trust-boundary-bypass"],
+      "Risk": "An allow-all tailnet rule collapses segmentation and can turn one compromised identity or device into broad lateral access.",
+      "Remediation": "Replace allow-all rules with reviewed groups, tags and explicit destination services; test policy before deployment."
+    },
+    {
+      "CheckId": "DOMAIN-007",
+      "Threats": ["subdomain-takeover", "credential-phishing"],
+      "Risk": "A dangling CNAME can let an attacker claim the external service and serve trusted content or phishing from the organization domain.",
+      "Remediation": "Remove the stale CNAME or reclaim the referenced service, then verify DNS and HTTP behavior before closing the finding."
+    },
+    {
+      "CheckId": "DOMAIN-008",
+      "DependsOn": ["DOMAIN-001", "DOMAIN-009"],
+      "RelatedTo": ["DOMAIN-011"]
+    },
+    {
+      "CheckId": "DOMAIN-011",
+      "RelatedTo": ["DOMAIN-009", "DOMAIN-010"]
+    },
+    {
+      "CheckId": "DOMAIN-014",
+      "RelatedTo": ["EXO-005"]
+    },
+    {
+      "CheckId": "EXO-010",
+      "RelatedTo": ["DOMAIN-004", "DOMAIN-012"]
+    },
+    {
+      "CheckId": "EXO-011",
+      "RelatedTo": ["DOMAIN-005", "DOMAIN-013"]
+    },
+    {
+      "CheckId": "VPS-007",
+      "DependsOn": ["VPS-003"],
+      "RelatedTo": ["VPS-004"]
+    },
+    {
+      "CheckId": "INV-001",
+      "RelatedTo": ["AWS-001", "AZURE-001", "GCP-001"]
+    }
+  ]
+}
