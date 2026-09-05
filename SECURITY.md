@@ -7,7 +7,8 @@ security data even when no credential is present.
 ## Trust boundaries
 
 - Run from a controlled admin workstation with least-privilege read-only identities.
-- Prefer `Start-ClauditSafeAudit.ps1` or the wizard; the direct runner intentionally skips the preflight gate.
+- Prefer `./claudit.sh formal`, `passive`, or the guided `wizard`; they enforce
+  explicit scope and confirmation gates before any live collection.
 - The dashboard is loopback-only and is not a network service. Do not publish it through a proxy, tunnel or port forward.
 - Keep `reports/`, private baselines and client profiles outside shared source history.
 - Pass tokens and webhooks through process environment variables. Never place secrets in a baseline, profile, command history or tenant label.

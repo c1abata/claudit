@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Symbolic AWS CLI: never contacts AWS. CLAUDIT_AWS_FIXTURE controls exactly
+# the collection state that the Bash collector must distinguish.
+set -euo pipefail
+args="$*"
+if [[ "$args" == *"sts get-caller-identity"* ]]; then
+    printf '%s\n' '{"Account":"000000000000","Arn":"arn:aws:iam::000000000000:role/audit"}'
+    exit 0
+fi
+if [[ "$args" == *"cloudtrail describe-trails"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy) printf '%s\n' '{"trailList":[{"Name":"symbolic-trail"}]}' ;;
+        empty) printf '%s\n' '{"trailList":[]}' ;;
+        malformed) printf '%s\n' '{"trailList":null}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+exit 64

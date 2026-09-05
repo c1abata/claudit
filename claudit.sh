@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
+# Claudit Bash front controller. All live operations are read-only.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLAUDIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/core.sh
+source "$CLAUDIT_ROOT/lib/core.sh"
 
-if ! command -v pwsh >/dev/null 2>&1; then
-  echo "claudit: pwsh is required. Install PowerShell 7.2+ first." >&2
-  exit 127
-fi
-
-exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$root/claudit.ps1" "$@"
+main "$@"

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 - 2026-09-05
+
+- Complete the Linux-first Bash runtime migration and retain PowerShell only as
+  legacy reference material or the isolated Exchange adapter.
+- Bind every runtime finding to a versioned catalog entry with service, level,
+  category and remediation; reject mismatched collector output.
+- Add business-domain DNS posture checks and deterministic healthy, weak and
+  unavailable DNS fixtures.
+- Make CloudTrail collection distinguish empty, denied and malformed responses.
+- Add a non-mutating installer dry-run and preserve executable permission for
+  the systemd service launcher after installation.
+
 ## 0.3.1 - 2026-07-27
 
 - Fail closed when an expected service/control-level catalog entry produces no

@@ -1,0 +1,3 @@
+{"id":"EXO-001","status":"pass","severity":"info","title":"Modern authentication enabled","detail":"OAuth2 client profile is enabled."}
+{"id":"EXO-002","status":"pass","severity":"info","title":"Organization-wide mailbox auditing enabled","detail":"Mailbox auditing is enabled."}
+{"id":"EXO-003","status":"fail","severity":"high","title":"External auto-forwarding blocked","detail":"An outbound policy allows external forwarding."}

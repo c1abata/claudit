@@ -1,0 +1,13 @@
+{
+  "example.com|A": {"Status": 0, "Answer": [{"data": "203.0.113.10"}]},
+  "example.com|AAAA": {"Status": 0, "Answer": [{"data": "2001:db8::10"}]},
+  "example.com|MX": {"Status": 0, "Answer": [{"data": "10 mail.example.com."}]},
+  "example.com|NS": {"Status": 0, "Answer": [{"data": "ns1.example.net."}, {"data": "ns2.example.net."}]},
+  "example.com|CAA": {"Status": 0, "Answer": [{"data": "0 issue letsencrypt.org"}]},
+  "example.com|TXT": {"Status": 0, "Answer": [{"data": "v=spf1 include:_spf.example.net -all"}]},
+  "_dmarc.example.com|TXT": {"Status": 0, "Answer": [{"data": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com"}]},
+  "example.com|DNSKEY": {"Status": 0, "AD": true, "Answer": [{"data": "257 3 13 test"}]},
+  "_mta-sts.example.com|TXT": {"Status": 0, "Answer": [{"data": "v=STSv1; id=20260905"}]},
+  "_smtp._tls.example.com|TXT": {"Status": 0, "Answer": [{"data": "v=TLSRPTv1; rua=mailto:tls@example.com"}]},
+  "default._domainkey.example.com|TXT": {"Status": 0, "Answer": [{"data": "v=DKIM1; k=rsa; p=test"}]}
+}

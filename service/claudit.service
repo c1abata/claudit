@@ -1,6 +1,6 @@
 [Unit]
 Description=Claudit multi-cloud audit orchestrator
-Documentation=file:/opt/claudit/docs/OPERATIONS.md
+Documentation=file:/opt/claudit/docs/DEPLOYMENT.md
 Wants=network-online.target
 After=network-online.target
 
@@ -9,8 +9,8 @@ Type=simple
 User=claudit
 Group=claudit
 WorkingDirectory=/opt/claudit
-ExecStartPre=/usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File /opt/claudit/service/Start-ClauditService.ps1 -ConfigPath /etc/claudit/service.json -ValidateOnly
-ExecStart=/usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File /opt/claudit/service/Start-ClauditService.ps1 -ConfigPath /etc/claudit/service.json
+ExecStartPre=/opt/claudit/claudit.sh doctor --output-directory /var/lib/claudit/reports/preflight
+ExecStart=/opt/claudit/service/claudit-service.sh
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s

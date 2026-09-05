@@ -6,26 +6,32 @@ install_root="/opt/claudit"
 config_root="/etc/claudit"
 data_root="/var/lib/claudit"
 start_service=1
+dry_run=0
 
 usage() {
   cat <<'EOF'
-Usage: sudo bash ./install-ubuntu.sh [--no-start]
+Usage: sudo bash ./install-ubuntu.sh [--no-start] [--dry-run]
 
 Installs Claudit under /opt/claudit, creates the restricted claudit service
 account, persistent storage under /var/lib/claudit and a systemd unit.
 Existing /etc/claudit/service.json and /etc/claudit/claudit.env are preserved.
 Legacy baselines, wizard profiles and reports are migrated without overwrite.
+--dry-run validates the source tree and deployment prerequisites without
+changing the host; it does not require root.
 EOF
 }
 
-case "${1:-}" in
-  '') ;;
-  --no-start) start_service=0 ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 64 ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-start) start_service=0 ;;
+    --dry-run) dry_run=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+  shift
+done
 
-if [[ ${EUID} -ne 0 ]]; then
+if [[ ${EUID} -ne 0 && ${dry_run} -ne 1 ]]; then
   echo "claudit: installer must run as root (use sudo)." >&2
   exit 77
 fi
@@ -33,18 +39,26 @@ if ! command -v systemctl >/dev/null 2>&1; then
   echo "claudit: systemd/systemctl is required." >&2
   exit 69
 fi
-if [[ ! -x /usr/bin/pwsh ]]; then
-  echo "claudit: /usr/bin/pwsh 7.2+ is required before installation." >&2
-  echo "See https://learn.microsoft.com/powershell/scripting/install/install-ubuntu" >&2
+if ! command -v bash >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+  echo "claudit: bash, jq and curl are required before installation." >&2
   exit 69
 fi
-if ! /usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion -lt [version]"7.2") { exit 1 }'; then
-  echo "claudit: PowerShell 7.2 or newer is required." >&2
-  exit 69
-fi
-if [[ ! -f "${source_root}/Claudit.psd1" || ! -f "${source_root}/service/claudit.service" ]]; then
+if [[ ! -f "${source_root}/claudit.sh" || ! -f "${source_root}/service/claudit.service" ]]; then
   echo "claudit: run this installer from a complete Claudit source tree." >&2
   exit 66
+fi
+if [[ ! -x "${source_root}/service/claudit-service.sh" || ! -f "${source_root}/config/runtime-control-catalog.json" ]]; then
+  echo "claudit: Bash runtime service launcher or control catalog is missing." >&2
+  exit 66
+fi
+if ! bash -n "${source_root}/claudit.sh" "${source_root}/lib/"*.sh "${source_root}/checks/"*.sh "${source_root}/service/claudit-service.sh"; then
+  echo "claudit: source tree has a Bash syntax error." >&2
+  exit 65
+fi
+jq -e '.Version | type == "string"' "${source_root}/config/runtime-control-catalog.json" >/dev/null || { echo 'claudit: runtime control catalog is invalid.' >&2; exit 65; }
+if [[ ${dry_run} -eq 1 ]]; then
+  echo 'claudit: deployment dry-run passed; no host state was changed.'
+  exit 0
 fi
 
 if ! id -u claudit >/dev/null 2>&1; then
@@ -93,14 +107,9 @@ fi
 
 if [[ -n "${legacy_baseline_backup}" ]]; then
   merged_baseline="${upgrade_backup}/merged-baseline.json"
-  /usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File "${source_root}/service/Merge-ClauditBaseline.ps1" \
-    -DefaultPath "${source_root}/config/baseline.json" \
-    -LegacyPath "${legacy_baseline_backup}" \
-    -DestinationPath "${merged_baseline}"
-  chmod 0640 "${merged_baseline}"
-  /usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -Command \
-    '& { param($modulePath, $baselinePath) Import-Module -LiteralPath $modulePath -Force -ErrorAction Stop; Get-CaBaseline -Path $baselinePath -Force | Out-Null }' \
-    "${source_root}/Claudit.psd1" "${merged_baseline}"
+  # Preserve a pre-Bash baseline verbatim. The Bash core treats baselines as
+  # policy input and never mutates operator data during an upgrade.
+  install -o root -g claudit -m 0640 "${legacy_baseline_backup}" "${merged_baseline}"
 fi
 
 # Older wizard runs lived below /opt/claudit/reports. Copy regular files into
@@ -125,20 +134,24 @@ if [[ -d "${install_root}/reports" && ! -L "${install_root}/reports" ]]; then
 fi
 
 install -d -o root -g root -m 0755 "${install_root}"
-for directory in src config docs service tests web schemas; do
+for directory in backends checks config docs lib service tests web schemas legacy; do
   rm -rf -- "${install_root:?}/${directory}"
 done
 find "${install_root}" -mindepth 1 -maxdepth 1 -type f \( -name '*.ps1' -o -name '*.psm1' -o -name '*.psd1' -o -name '*.sh' -o -name '*.md' \) -delete
-install -d -o root -g root -m 0755 "${install_root}/src" "${install_root}/config" "${install_root}/docs" "${install_root}/service" "${install_root}/tests" "${install_root}/web" "${install_root}/schemas"
-cp -a "${source_root}/src/." "${install_root}/src/"
+install -d -o root -g root -m 0755 "${install_root}/backends" "${install_root}/checks" "${install_root}/config" "${install_root}/docs" "${install_root}/lib" "${install_root}/service" "${install_root}/tests" "${install_root}/web" "${install_root}/schemas" "${install_root}/legacy"
+cp -a "${source_root}/backends/." "${install_root}/backends/"
+cp -a "${source_root}/checks/." "${install_root}/checks/"
 cp -a "${source_root}/config/." "${install_root}/config/"
 cp -a "${source_root}/docs/." "${install_root}/docs/"
+cp -a "${source_root}/lib/." "${install_root}/lib/"
 cp -a "${source_root}/service/." "${install_root}/service/"
 cp -a "${source_root}/tests/." "${install_root}/tests/"
 cp -a "${source_root}/web/." "${install_root}/web/"
 cp -a "${source_root}/schemas/." "${install_root}/schemas/"
 
-for file in LICENSE README.md CHANGELOG.md SECURITY.md Claudit.psd1 Claudit.psm1 claudit.ps1 claudit.sh Install-ClauditPrerequisites.ps1 Invoke-ClauditAudit.ps1 Reset-ClauditEnvironment.ps1 Start-ClauditDashboard.ps1 Start-ClauditSafeAudit.ps1 Start-ClauditWizard.ps1 Test-ClauditPreflight.ps1; do
+cp -a "${source_root}/legacy/." "${install_root}/legacy/"
+
+for file in LICENSE README.md CHANGELOG.md SECURITY.md claudit.sh; do
   install -o root -g root -m 0644 "${source_root}/${file}" "${install_root}/${file}"
 done
 
@@ -148,7 +161,7 @@ fi
 
 find "${install_root}" -type d -exec chmod 0755 {} +
 find "${install_root}" -type f -exec chmod 0644 {} +
-chmod 0755 "${install_root}/claudit.sh"
+chmod 0755 "${install_root}/claudit.sh" "${install_root}/tests/run.sh" "${install_root}/service/claudit-service.sh"
 chown -R root:root "${install_root}"
 
 install -d -o root -g claudit -m 0750 "${config_root}"
@@ -161,10 +174,7 @@ fi
 
 install -o root -g root -m 0644 "${source_root}/service/claudit.service" /etc/systemd/system/claudit.service
 
-/usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -Command \
-  '& { param($modulePath, $baselinePath) Import-Module -LiteralPath $modulePath -Force -ErrorAction Stop; Get-CaBaseline -Path $baselinePath -Force | Out-Null }' \
-  "${install_root}/Claudit.psd1" "${install_root}/config/baseline.json"
-runuser -u claudit -- /usr/bin/pwsh -NoLogo -NoProfile -NonInteractive -File "${install_root}/service/Start-ClauditService.ps1" -ConfigPath "${config_root}/service.json" -ValidateOnly
+runuser -u claudit -- "${install_root}/claudit.sh" doctor --output-directory "${data_root}/reports/install-preflight" >/dev/null
 
 systemctl daemon-reload
 systemctl enable claudit.service
