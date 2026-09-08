@@ -3,15 +3,99 @@
 # the collection state that the Bash collector must distinguish.
 set -euo pipefail
 args="$*"
+if [[ "$args" == *"ec2 describe-instances"* ]]; then
+    printf '%s\n' '{"Reservations":[{"Instances":[{"InstanceId":"i-fixture"}]}]}'
+    exit 0
+fi
 if [[ "$args" == *"sts get-caller-identity"* ]]; then
     printf '%s\n' '{"Account":"000000000000","Arn":"arn:aws:iam::000000000000:role/audit"}'
     exit 0
 fi
 if [[ "$args" == *"cloudtrail describe-trails"* ]]; then
     case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
-        healthy) printf '%s\n' '{"trailList":[{"Name":"symbolic-trail"}]}' ;;
+        healthy|paginated) printf '%s\n' '{"trailList":[{"Name":"symbolic-trail","IsMultiRegionTrail":true,"LogFileValidationEnabled":true}]}' ;;
+        insecure) printf '%s\n' '{"trailList":[{"Name":"symbolic-trail","IsMultiRegionTrail":false,"LogFileValidationEnabled":false}]}' ;;
         empty) printf '%s\n' '{"trailList":[]}' ;;
         malformed) printf '%s\n' '{"trailList":null}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"iam get-account-summary"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy|empty|paginated) printf '%s\n' '{"SummaryMap":{"AccountMFAEnabled":1}}' ;;
+        insecure) printf '%s\n' '{"SummaryMap":{"AccountMFAEnabled":0}}' ;;
+        malformed) printf '%s\n' '{"SummaryMap":{"AccountMFAEnabled":"unknown"}}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"iam get-account-password-policy"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy|empty|paginated) printf '%s\n' '{"PasswordPolicy":{"MinimumPasswordLength":14,"MaxPasswordAge":90,"PasswordReusePrevention":24}}' ;;
+        insecure) printf '%s\n' '{"PasswordPolicy":{"MinimumPasswordLength":8,"MaxPasswordAge":180,"PasswordReusePrevention":3}}' ;;
+        malformed) printf '%s\n' '{"PasswordPolicy":{"MinimumPasswordLength":"unknown"}}' ;;
+        denied) printf '%s\n' 'AccessDenied' >&2; exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"iam list-users"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy|insecure) printf '%s\n' '{"Users":[{"UserName":"symbolic-user"}]}' ;;
+        empty) printf '%s\n' '{"Users":[]}' ;;
+        paginated)
+            if [[ "$args" == *"--starting-token users-second"* ]]; then printf '%s\n' '{"Users":[{"UserName":"second-user"}]}'
+            else printf '%s\n' '{"Users":[{"UserName":"first-user"}],"NextToken":"users-second"}'; fi ;;
+        malformed) printf '%s\n' '{"Users":{}}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"iam list-access-keys"* ]]; then
+    if [[ "${CLAUDIT_AWS_FIXTURE:-healthy}" == insecure ]]; then created="$(date -u -d '400 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+    else created="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"; fi
+    printf '{"AccessKeyMetadata":[{"Status":"Active","CreateDate":"%s"}]}\n' "$created"
+    exit 0
+fi
+if [[ "$args" == *"ec2 describe-vpcs"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy|insecure) printf '%s\n' '{"Vpcs":[{"VpcId":"vpc-primary"}]}' ;;
+        empty) printf '%s\n' '{"Vpcs":[]}' ;;
+        paginated)
+            if [[ "$args" == *"--starting-token vpcs-second"* ]]; then printf '%s\n' '{"Vpcs":[{"VpcId":"vpc-second"}]}'
+            else printf '%s\n' '{"Vpcs":[{"VpcId":"vpc-first"}],"NextToken":"vpcs-second"}'; fi ;;
+        malformed) printf '%s\n' '{"Vpcs":{}}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"ec2 describe-flow-logs"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy) printf '%s\n' '{"FlowLogs":[{"ResourceId":"vpc-primary","FlowLogStatus":"ACTIVE","DeliverLogsStatus":"SUCCESS"}]}' ;;
+        insecure) printf '%s\n' '{"FlowLogs":[{"ResourceId":"vpc-primary","FlowLogStatus":"ACTIVE","DeliverLogsStatus":"ERROR"}]}' ;;
+        empty) printf '%s\n' '{"FlowLogs":[]}' ;;
+        paginated)
+            if [[ "$args" == *"--starting-token flows-second"* ]]; then printf '%s\n' '{"FlowLogs":[{"ResourceId":"vpc-second","FlowLogStatus":"ACTIVE","DeliverLogsStatus":"SUCCESS"}]}'
+            else printf '%s\n' '{"FlowLogs":[{"ResourceId":"vpc-first","FlowLogStatus":"ACTIVE","DeliverLogsStatus":"SUCCESS"}],"NextToken":"flows-second"}'; fi ;;
+        malformed) printf '%s\n' '{"FlowLogs":{}}' ;;
+        denied) exit 255 ;;
+        *) exit 64 ;;
+    esac
+    exit 0
+fi
+if [[ "$args" == *"ec2 describe-security-groups"* ]]; then
+    case "${CLAUDIT_AWS_FIXTURE:-healthy}" in
+        healthy|empty) printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-healthy","IpPermissions":[{"IpProtocol":"tcp","FromPort":443,"ToPort":443,"IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]}]}' ;;
+        insecure) printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-open-ssh","IpPermissions":[{"IpProtocol":"tcp","FromPort":22,"ToPort":22,"IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]}]}' ;;
+        paginated)
+            if [[ "$args" == *"--starting-token second"* ]]; then printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-second","IpPermissions":[{"IpProtocol":"tcp","FromPort":443,"ToPort":443,"Ipv6Ranges":[{"CidrIpv6":"::/0"}]}]}]}'
+            else printf '%s\n' '{"SecurityGroups":[{"GroupId":"sg-first","IpPermissions":[]}],"NextToken":"second"}'; fi ;;
+        malformed) printf '%s\n' '{"SecurityGroups":{}}' ;;
         denied) exit 255 ;;
         *) exit 64 ;;
     esac

@@ -13,7 +13,7 @@ ca_check_exchange() {
         ca_command_exists pwsh || { ca_finding CA-EXO-000 Exchange unknown high 'PowerShell Exchange backend unavailable' 'Install PowerShell 7 and ExchangeOnlineManagement only for Exchange Online controls.'; return; }
         backend="$CLAUDIT_ROOT/backends/exchange.ps1"
         source_file="$(mktemp "$CLAUDIT_OUTPUT_DIRECTORY/.exchange.XXXXXX")"
-        if ! pwsh -NoLogo -NoProfile -NonInteractive -File "$backend" -BaselinePath "$(ca_baseline_path)" \
+        if ! ca_run_cli pwsh -NoLogo -NoProfile -NonInteractive -File "$backend" -BaselinePath "$(ca_baseline_path)" \
             -Organization "$CLAUDIT_EXCHANGE_ORGANIZATION" -TenantId "$CLAUDIT_EXCHANGE_TENANT_ID" \
             -ClientId "$CLAUDIT_EXCHANGE_CLIENT_ID" -CertificateThumbprint "$CLAUDIT_EXCHANGE_CERTIFICATE_THUMBPRINT" > "$source_file"; then
             rm -f -- "$source_file"

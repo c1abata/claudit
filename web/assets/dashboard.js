@@ -3,6 +3,8 @@
 const state = {
     services: [],
     authCatalog: [],
+    baselineCapabilities: [],
+    dnsResolver: null,
     reports: [],
     operations: [],
     selectedOperation: null,
@@ -248,10 +250,45 @@ function renderAuthPlan() {
     replaceChildren(target, gates);
 }
 
+function renderBaselineCapabilities() {
+    const target = qs("#baselineCapabilities");
+    if (!target) return;
+    const selected = new Set(selectedServices());
+    const entries = state.baselineCapabilities.filter((entry) => {
+        const service = entry.Path.split(".", 1)[0];
+        return !selected.size || selected.has(service) || (service === "Entra" && selected.has("M365"));
+    });
+    if (!entries.length) {
+        replaceChildren(target, [element("p", { className: "muted", text: "Select a service to see its baseline capability map." })]);
+        return;
+    }
+    replaceChildren(target, entries.map((entry) => element("div", { className: "auth-gate" }, [
+        element("div", { className: "auth-gate-title", text: entry.Path }),
+        pill(entry.State.replace("_", " ")),
+        element("div", { className: "auth-gate-hint", text: entry.Explanation }),
+        element("div", { className: "auth-gate-meta", text: entry.Controls.length ? `Controls: ${entry.Controls.join(", ")}` : "No executable control" }),
+    ])));
+}
+
+function renderDnsResolver() {
+    const target = qs("#dnsResolverContext");
+    const resolver = state.dnsResolver;
+    if (!target) return;
+    if (!resolver) {
+        target.textContent = "DNS resolver configuration is unavailable; do not run Passive DNS collection.";
+        return;
+    }
+    const scope = resolver.private ? "private-zone capable (operator-declared)" : "public";
+    target.textContent = `DNS evidence uses ${resolver.name} (${scope}), with a ${resolver.timeoutSeconds}s limit. Public fallback is ${resolver.fallback}. Endpoint: ${resolver.endpoint}`;
+}
+
 function refreshWizard() {
     const microsoft = hasProvider("Microsoft365");
     const appOnly = qs("#authMode").value === "AppOnly";
-    const active = qs("#controlLevel").value === "Active";
+    const mode = qs("#opMode").value;
+    const level = qs("#controlLevel");
+    if (mode === "safe") level.value = "Formal";
+    const active = mode === "audit" && level.value === "Active";
     const vps = hasService("VPS");
 
     setGroup("m365", microsoft);
@@ -264,17 +301,20 @@ function refreshWizard() {
     setGroup("domain", hasService("Domain"));
     setGroup("vps", vps);
     setGroup("active", active);
+    level.disabled = mode === "preflight" || mode === "safe";
     qsa(".active.vps").forEach((node) => {
         node.hidden = !(active && vps);
     });
     renderAuthPlan();
+    renderBaselineCapabilities();
+    renderDnsResolver();
 }
 
 function reportSignalText(report) {
     const summary = report.Summary;
     if (!summary) return "raw file";
     if (summary.Kind === "audit") {
-        return `${summary.Outcome || "Unknown"} / ${summary.Problems || 0} problems / ${summary.Error || 0} errors / ${summary.Coverage ?? 100}% coverage`;
+        return `${summary.Assessment || "Unclassified"} · ${summary.Outcome || "Unknown"} · ${summary.Fail || 0} failed · ${summary.Warning || 0} warnings · ${summary.NotEvaluated || 0} not assessed · ${summary.Coverage ?? 0}% coverage`;
     }
     if (summary.Kind === "preflight") {
         return `${summary.Status || "Info"} ${summary.Fail || 0} fail, ${summary.Warning || 0} warn`;
@@ -296,7 +336,7 @@ function reportSignal(report) {
 }
 
 function latestAudit() {
-    return state.reports.find((report) => report.Summary && report.Summary.Kind === "audit");
+    return state.reports.find((report) => ["passive", "active"].includes(report.Operation?.Command));
 }
 
 function renderMetrics() {
@@ -347,7 +387,7 @@ function renderOperations() {
                 element("span", { className: "cell-title", text: operation.Id }),
                 element("span", { className: "cell-subtle", text: localTime(operation.StartedUtc) }),
             ]),
-            element("td", { text: `${operation.Mode} / ${operation.ControlLevel || "Passive"}` }),
+            element("td", { text: `${operation.Mode} / ${operation.EffectiveControlLevel || operation.Command || operation.ControlLevel || "Passive"}` }),
             statusCell,
             element("td", { text: (operation.Services || []).join(", ") }),
             element("td", {}, [element("span", { className: "cell-subtle", text: operation.OutputDirectory || "" })]),
@@ -372,15 +412,12 @@ function renderReports() {
     }
 
     replaceChildren(target, rows.map((report) => {
-        const open = element("a", {
-            className: "link",
-            text: "Open",
-            attrs: {
-                href: `/api/report?path=${encodeURIComponent(report.RelativePath)}`,
-                target: "_blank",
-                rel: "noopener",
-            },
-        });
+        const actions = Object.entries(report.Artifacts || { JSON: report.RelativePath }).map(([label, path]) => element("a", {
+            className: "link", text: label,
+            attrs: { href: `/api/report?path=${encodeURIComponent(path)}`, target: "_blank", rel: "noopener" },
+        }));
+        const actionCell = element("td");
+        actions.forEach((action, index) => { if (index) actionCell.append(document.createTextNode(" · ")); actionCell.append(action); });
         return element("tr", {}, [
             element("td", {}, [
                 element("span", { className: "cell-title", text: report.Name }),
@@ -390,7 +427,7 @@ function renderReports() {
             element("td", { text: localTime(report.LastWriteUtc) }),
             element("td", {}, [reportSignal(report)]),
             element("td", { text: formatBytes(report.SizeBytes) }),
-            element("td", {}, [open]),
+            actionCell,
         ]);
     }));
 }
@@ -417,6 +454,8 @@ async function refresh() {
         const snapshot = await api("/api/state");
         state.services = snapshot.services || [];
         state.authCatalog = snapshot.authCatalog || [];
+        state.baselineCapabilities = snapshot.baselineCapabilities || [];
+        state.dnsResolver = snapshot.dnsResolver || null;
         state.reports = snapshot.reports || [];
         state.operations = snapshot.operations || [];
 
@@ -433,6 +472,7 @@ async function refresh() {
         renderActivitySummary();
         renderOperations();
         renderReports();
+        document.dispatchEvent(new CustomEvent("claudit:state-refreshed"));
         setConnection(true);
     } catch (error) {
         setConnection(false, error.message);
@@ -481,10 +521,12 @@ async function saveRetention() {
 }
 
 function operationRequest() {
+    const mode = qs("#opMode").value;
     return {
-        mode: qs("#opMode").value,
+        mode,
         retentionCount: retentionValue(),
-        controlLevel: qs("#controlLevel").value,
+        controlLevel: mode === "safe" ? "Formal" : qs("#controlLevel").value,
+        confirmTenantConnection: qs("#confirmTenantConnection").checked,
         confirmActiveProbes: qs("#confirmActiveProbes").value === "true",
         activeTimeoutMs: qs("#activeTimeoutMs").value,
         vpsProbePort: qs("#vpsProbePort").value,
@@ -563,6 +605,7 @@ function bindEvents() {
     qs("#authMode").addEventListener("change", refreshWizard);
     qs("#graphAuthMode").addEventListener("change", refreshWizard);
     qs("#controlLevel").addEventListener("change", refreshWizard);
+    qs("#opMode").addEventListener("change", refreshWizard);
     qs("#reportFilter").addEventListener("input", renderReports);
 
     qs("#saveRetention").addEventListener("click", (event) => {

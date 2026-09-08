@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared runtime for Claudit. Keep this dependency-light: bash, curl and jq.
 
-CLAUDIT_VERSION="0.4.0"
+CLAUDIT_VERSION="0.5.0"
 CLAUDIT_LEVEL="formal"
 CLAUDIT_SERVICE=""
 CLAUDIT_DOMAIN=""
@@ -31,11 +31,10 @@ CLAUDIT_DOH_FIXTURE="${CLAUDIT_DOH_FIXTURE:-}"
 ca_die() { printf 'claudit: %s\n' "$*" >&2; exit 64; }
 ca_log() { printf '%s claudit: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }
 ca_command_exists() { command -v "$1" >/dev/null 2>&1; }
+ca_run_cli() { timeout --foreground --signal=TERM --kill-after=5 60 "$@"; }
 ca_json_escape() { jq -Rn --arg value "$1" '$value'; }
 ca_uuid_from_text() {
-    local hash
-    hash="$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)"
-    printf '%s-%s-%s-%s-%s' "${hash:0:8}" "${hash:8:4}" "${hash:12:4}" "${hash:16:4}" "${hash:20:12}"
+    python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1]))' "$1"
 }
 
 ca_usage() {
@@ -54,7 +53,7 @@ Common options:
   --confirm-tenant-connection Allow authenticated cloud API queries
   --confirm-active-probes     Required for active network probes
   --aws-profile NAME          AWS CLI profile
-  --aws-region LIST           AWS regions
+  --aws-region NAME           One explicit AWS region per assessment
   --azure-subscription ID     Azure subscription
   --gcp-project ID            Google Cloud project
   --baseline PATH             Optional baseline JSON
@@ -77,6 +76,7 @@ ca_init_run() {
     local timestamp
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     CLAUDIT_OUTPUT_DIRECTORY="${CLAUDIT_OUTPUT_DIRECTORY:-$CLAUDIT_ROOT/reports/$timestamp}"
+    umask 077
     mkdir -p -- "$CLAUDIT_OUTPUT_DIRECTORY"
     CLAUDIT_FINDINGS_FILE="$(mktemp "$CLAUDIT_OUTPUT_DIRECTORY/.findings.XXXXXX")"
     : > "$CLAUDIT_FINDINGS_FILE"
@@ -107,27 +107,80 @@ Domain:AuthorizedDomains
 VPS:AllowedPublicPorts
 Inventory:MaxAssetsPerProvider
 EOF
+    jq -e --arg domain "$CLAUDIT_DOMAIN" '
+      (.Domain.ExpectedRecords // []) as $records |
+      ($records | type == "array" and length <= 50) and
+      all($records[]; (.name | type == "string") and (.name == $domain or (.name | endswith("." + $domain))) and
+        (.name | test("^[A-Za-z0-9_][A-Za-z0-9_.-]*$")) and
+        (.type as $t | ["A","AAAA","CNAME","MX","NS","TXT","CAA"] | index($t) != null) and
+        (.values | type == "array" and length <= 30) and all(.values[]; type == "string" and length <= 2048))
+    ' "$path" >/dev/null || ca_die 'invalid or out-of-scope Domain.ExpectedRecords'
+    jq -e '
+      .Domain.Resolver as $resolver |
+      ($resolver | type == "object") and
+      ($resolver.Name | type == "string" and length >= 1 and length <= 120) and
+      ($resolver.Endpoint | type == "string" and test("^https://[^/?#@]+(/[^?#]*)?$")) and
+      ($resolver.Private | type == "boolean") and
+      ($resolver.TimeoutSeconds | type == "number" and floor == . and . >= 1 and . <= 30)
+    ' "$path" >/dev/null || ca_die 'invalid Domain.Resolver; use an explicit HTTPS endpoint, 1–30 second timeout and no credentials, query or fragment'
     jq -e '[.VPS.AllowedPublicPorts[] | type == "number" and . >= 1 and . <= 65535] | all' "$path" >/dev/null || ca_die "baseline '$path' has invalid VPS.AllowedPublicPorts"
+    jq -e '
+      (.AWS.RequireRootMfa | type == "boolean") and
+      (.AWS.RequireMultiRegionCloudTrail | type == "boolean") and
+      (.AWS.RequireCloudTrailLogFileValidation | type == "boolean") and
+      (.AWS.BlockPublicAdministrativeIngress | type == "boolean") and
+      (.AWS.MaxAccessKeyAgeDays | type == "number" and floor == . and . >= 1 and . <= 3650) and
+      (.AWS.AllowedPublicIngressPorts | type == "array" and length <= 100 and
+        all(.[]; type == "number" and floor == . and . >= 1 and . <= 65535))
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid AWS control values"
+    jq -e '
+      .Azure.RequiredActivityLogCategories |
+      type == "array" and length <= 20 and
+      all(.[]; type == "string" and length >= 1 and length <= 80)
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid Azure.RequiredActivityLogCategories"
+    jq -e '.GCP.MaxServiceAccountKeyAgeDays | type == "number" and floor == . and . >= 1 and . <= 3650' "$path" >/dev/null || ca_die "baseline '$path' has invalid GCP.MaxServiceAccountKeyAgeDays"
+    jq -e '.Inventory.MaxAssetsPerProvider | type == "number" and floor == . and . >= 1 and . <= 10000' "$path" >/dev/null || ca_die "baseline '$path' has invalid Inventory.MaxAssetsPerProvider"
 }
 
 ca_baseline_get() { jq -c "$1" "$(ca_baseline_path)"; }
 ca_baseline_enabled() { [[ "$(ca_baseline_get "$1")" == true ]]; }
 
+ca_finding_scope_key() {
+    case "$1" in
+        Domain) printf 'domain:%s' "$CLAUDIT_DOMAIN" ;;
+        VPS) printf 'vps:%s' "$CLAUDIT_VPS_TARGET" ;;
+        AWS) printf 'aws:%s:%s' "$CLAUDIT_AWS_PROFILE" "$CLAUDIT_AWS_REGIONS" ;;
+        Azure) printf 'azure:%s' "$CLAUDIT_AZURE_SUBSCRIPTION" ;;
+        GCP) printf 'gcp:%s' "$CLAUDIT_GCP_PROJECT" ;;
+        Tailscale) printf 'tailscale:%s' "$CLAUDIT_TAILSCALE_TAILNET" ;;
+        M365|Entra|SharePoint|OneDrive|Exchange) printf 'm365:%s' "$CLAUDIT_EXCHANGE_ORGANIZATION" ;;
+        Inventory) printf 'inventory:%s:%s:%s:%s' "$CLAUDIT_AWS_PROFILE" "$CLAUDIT_AZURE_SUBSCRIPTION" "$CLAUDIT_GCP_PROJECT" "$CLAUDIT_AWS_REGIONS" ;;
+        *) printf 'service:%s' "$1" ;;
+    esac
+}
+
 ca_finding() {
     local id="$1" service="$2" status="$3" severity="$4" title="$5" detail="$6"
-    local finding_id evidence_sha256 control expected_service
+    if [[ "$service" =~ ^(Entra|SharePoint|OneDrive)$ ]] && ! ca_selected M365 && ! ca_selected "$service"; then return 0; fi
+    local finding_id evidence_sha256 control expected_service scope_key resource_uid
     [[ "$status" =~ ^(pass|fail|warning|info|unknown|error|not_applicable)$ ]] || ca_die "invalid result state '$status' for $id"
     [[ "$severity" =~ ^(info|low|medium|high|critical)$ ]] || ca_die "invalid severity '$severity' for $id"
     control="$(ca_control_metadata "$id")" || ca_die "collector attempted uncatalogued control '$id'"
     expected_service="$(jq -r '.Service' <<<"$control")"
     [[ "$service" == "$expected_service" ]] || ca_die "collector emitted $id for service '$service'; catalog requires '$expected_service'"
-    finding_id="$(printf '%s' "$service|$id" | sha256sum | cut -d' ' -f1)"
+    scope_key="${7:-$(ca_finding_scope_key "$service")}"
+    resource_uid="$(printf '%s' "$scope_key" | sha256sum | cut -d' ' -f1)"
+    finding_id="$(printf '%s' "$service|$id|$resource_uid" | sha256sum | cut -d' ' -f1)"
     evidence_sha256="$(printf '%s' "$detail" | sha256sum | cut -d' ' -f1)"
+    if [[ "$service" == Domain && -s "$CLAUDIT_OUTPUT_DIRECTORY/claudit-dns-evidence.jsonl" ]]; then
+        # Hash normalized DNS observations as well as prose, excluding volatile TTLs.
+        evidence_sha256="$( { printf '%s' "$detail"; jq -sc 'map({name,type,resolver,status:.response.Status,authenticated:.response.AD,values:([.response.Answer[]?.data] | sort | unique)}) | sort_by(.name,.type)' "$CLAUDIT_OUTPUT_DIRECTORY/claudit-dns-evidence.jsonl"; } | sha256sum | cut -d' ' -f1)"
+    fi
     jq -cn --arg id "$id" --arg service "$service" --arg status "$status" \
         --arg severity "$severity" --arg title "$title" --arg detail "$detail" \
-        --arg level "$CLAUDIT_LEVEL" --arg observed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg finding_id "$finding_id" --arg evidence_sha256 "$evidence_sha256" \
+        --arg level "$CLAUDIT_LEVEL" --arg observed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg finding_id "$finding_id" --arg evidence_sha256 "$evidence_sha256" --arg resource_uid "$resource_uid" \
         --argjson control "$control" \
-        '{id:$id,finding_id:$finding_id,evidence_sha256:$evidence_sha256,service:$service,status:$status,severity:$severity,title:$title,detail:$detail,control_level:$level,observed_at:$observed,category:$control.Category,remediation:$control.Remediation,catalog_level:$control.Level}' \
+        '{id:$id,finding_id:$finding_id,resource_uid:$resource_uid,evidence_sha256:$evidence_sha256,service:$service,status:$status,severity:$severity,title:$title,detail:$detail,control_level:$level,observed_at:$observed,category:$control.Category,remediation:$control.Remediation,catalog_level:$control.Level}' \
         >> "$CLAUDIT_FINDINGS_FILE"
 }
 
@@ -143,8 +196,8 @@ ca_status_from_command() {
 ca_write_reports() {
     local json="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.json" csv="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.csv"
     local md="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.md" html="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.html"
-    jq -s --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg version "$CLAUDIT_VERSION" --arg catalog "$(jq -r .Version "$CLAUDIT_CONTROL_CATALOG")" \
-        '. as $findings | ($findings | length) as $total | {schema:"claudit/bash-report-v2",version:$version,catalog_version:$catalog,generated_at:$generated,findings:$findings,summary:{total:$total,failed:([$findings[]|select(.status=="fail")]|length),warnings:([$findings[]|select(.status=="warning")]|length),not_assessed:([$findings[]|select(.status=="unknown" or .status=="error")]|length),coverage:(if $total == 0 then 0 else (([$findings[]|select(.status!="unknown" and .status!="error")]|length) / $total * 100) end)}}' "$CLAUDIT_FINDINGS_FILE" > "$json"
+    jq -s --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg version "$CLAUDIT_VERSION" --arg catalog "$(jq -r .Version "$CLAUDIT_CONTROL_CATALOG")" --arg level "$CLAUDIT_LEVEL" --arg services "$CLAUDIT_SERVICE" --arg domain "$CLAUDIT_DOMAIN" --arg vps "$CLAUDIT_VPS_TARGET" --arg aws "$CLAUDIT_AWS_PROFILE" --arg regions "$CLAUDIT_AWS_REGIONS" --arg azure "$CLAUDIT_AZURE_SUBSCRIPTION" --arg gcp "$CLAUDIT_GCP_PROJECT" \
+        '. as $findings | ($findings | length) as $total | {schema:"claudit/bash-report-v2",version:$version,catalog_version:$catalog,scope:{level:$level,services:$services,domain:$domain,vps:$vps,aws_profile:$aws,aws_regions:$regions,azure_subscription:$azure,gcp_project:$gcp},generated_at:$generated,findings:$findings,summary:{total:$total,failed:([$findings[]|select(.status=="fail")]|length),warnings:([$findings[]|select(.status=="warning")]|length),not_assessed:([$findings[]|select(.status=="unknown" or .status=="error")]|length),coverage:(if $total == 0 then 0 else (([$findings[]|select(.status!="unknown" and .status!="error")]|length) / $total * 100) end)}}' "$CLAUDIT_FINDINGS_FILE" > "$json"
     case "$CLAUDIT_FORMAT" in
         json) ;;
         csv|all) jq -r '(["id","service","status","severity","title","detail","control_level","observed_at"], (.findings[] | [.id,.service,.status,.severity,.title,.detail,.control_level,.observed_at])) | @csv' "$json" > "$csv" ;;&
@@ -162,6 +215,8 @@ ca_write_reports() {
     esac
     ca_write_interchange "$json"
     cp -- "$CLAUDIT_CONTROL_CATALOG" "$CLAUDIT_OUTPUT_DIRECTORY/claudit-runtime-control-catalog.json"
+    cp -- "$(ca_baseline_path)" "$CLAUDIT_OUTPUT_DIRECTORY/claudit-baseline.json"
+    cp -- "$CLAUDIT_BASELINE_CAPABILITY_MAP" "$CLAUDIT_OUTPUT_DIRECTORY/claudit-baseline-capabilities.json"
     ca_send_notification "$json"
     ca_log "report written to $CLAUDIT_OUTPUT_DIRECTORY"
 }
@@ -175,7 +230,7 @@ ca_parse_options() {
             --output-directory) CLAUDIT_OUTPUT_DIRECTORY="${2:?--output-directory requires a value}"; shift 2 ;;
             --format) CLAUDIT_FORMAT="${2:?--format requires a value}"; shift 2 ;;
             --aws-profile) CLAUDIT_AWS_PROFILE="${2:?--aws-profile requires a value}"; shift 2 ;;
-            --aws-region) CLAUDIT_AWS_REGIONS="${2:?--aws-region requires a value}"; shift 2 ;;
+            --aws-region) CLAUDIT_AWS_REGIONS="${2:?--aws-region requires a value}"; [[ "$CLAUDIT_AWS_REGIONS" != *,* ]] || ca_die 'select one AWS region per assessment'; shift 2 ;;
             --azure-subscription) CLAUDIT_AZURE_SUBSCRIPTION="${2:?--azure-subscription requires a value}"; shift 2 ;;
             --gcp-project) CLAUDIT_GCP_PROJECT="${2:?--gcp-project requires a value}"; shift 2 ;;
             --tailscale-tailnet) CLAUDIT_TAILSCALE_TAILNET="${2:?--tailscale-tailnet requires a value}"; shift 2 ;;
@@ -197,10 +252,18 @@ ca_parse_options() {
 ca_selected() { [[ -z "$CLAUDIT_SERVICE" || ",$CLAUDIT_SERVICE," == *",$1,"* || ",$CLAUDIT_SERVICE," == *",All,"* ]]; }
 
 ca_run_audit() {
+    local service_name
+    IFS=',' read -r -a requested_services <<<"${CLAUDIT_SERVICE:-All}"
+    for service_name in "${requested_services[@]}"; do
+        [[ "$service_name" =~ ^(All|Domain|VPS|AWS|Azure|GCP|Tailscale|M365|Entra|SharePoint|OneDrive|Exchange|Inventory)$ ]] || ca_die "unsupported service '$service_name'"
+    done
     ca_require_runtime || return
+    [[ "$CLAUDIT_LEVEL" != formal ]] || CLAUDIT_CONFIRM_CONNECTION=0
     ca_init_run
     ca_validate_control_catalog
     ca_validate_baseline "$(ca_baseline_path)"
+    ca_validate_baseline_capabilities
+    ca_validate_baseline_capability_coverage "$(ca_baseline_path)"
     ca_finding CA-BASELINE-001 Runtime pass info 'Baseline validated' 'The baseline satisfies the Bash runtime contract.'
     if ca_selected Domain; then ca_check_domain; fi
     if ca_selected VPS; then ca_check_vps; fi
@@ -211,6 +274,7 @@ ca_run_audit() {
     if ca_selected M365 || ca_selected Entra || ca_selected SharePoint || ca_selected OneDrive; then ca_check_m365; fi
     if ca_selected M365 || ca_selected Exchange; then ca_check_exchange; fi
     if ca_selected Inventory; then ca_check_inventory; fi
+    ca_complete_controls
     ca_validate_emitted_controls
     ca_write_reports
 }

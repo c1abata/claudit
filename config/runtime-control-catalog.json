@@ -1,8 +1,11 @@
 {
-  "Version": "2026.09.0",
+  "Version": "2026.09.1",
   "Controls": [
     {"Id":"CA-BASELINE-001","Service":"Runtime","Level":"Formal","Category":"governance","Remediation":"Correct the local baseline before relying on any audit result."},
+    {"Id":"CA-RT-001","Service":"Runtime","Level":"Formal","Category":"runtime","Remediation":"Install jq before running Claudit."},
+    {"Id":"CA-RT-002","Service":"Runtime","Level":"Formal","Category":"runtime","Remediation":"Install curl before running Claudit."},
     {"Id":"CA-DNS-000","Service":"Domain","Level":"Formal","Category":"scope","Remediation":"Declare a syntactically valid, explicitly authorized business domain."},
+    {"Id":"CA-DNS-001","Service":"Domain","Level":"Passive","Category":"runtime","Remediation":"Install a DNS resolver client such as dnsutils, or use the configured DNS-over-HTTPS collector."},
     {"Id":"CA-DNS-A","Service":"Domain","Level":"Passive","Category":"dns","Remediation":"Review the expected public A records and remove stale endpoints."},
     {"Id":"CA-DNS-AAAA","Service":"Domain","Level":"Passive","Category":"dns","Remediation":"Review the expected public IPv6 records and remove stale endpoints."},
     {"Id":"CA-DNS-MX","Service":"Domain","Level":"Passive","Category":"email","Remediation":"Publish the intended MX route or an explicit null MX for domains that do not receive mail."},
@@ -19,12 +22,25 @@
     {"Id":"CA-AWS-001","Service":"AWS","Level":"Passive","Category":"runtime","Remediation":"Install AWS CLI v2 and use an authorized read-only profile."},
     {"Id":"CA-AWS-002","Service":"AWS","Level":"Passive","Category":"identity","Remediation":"Restore read-only account access and verify the selected profile and region."},
     {"Id":"CA-AWS-TRAIL","Service":"AWS","Level":"Passive","Category":"logging","Remediation":"Enable a multi-region CloudTrail with protected centralized retention."},
+    {"Id":"CA-AWS-ROOT-MFA","Service":"AWS","Level":"Passive","Category":"identity","Remediation":"Enable hardware or virtual MFA for the AWS account root user."},
+    {"Id":"CA-AWS-PASSWORD-POLICY","Service":"AWS","Level":"Passive","Category":"identity","Remediation":"Configure the IAM password policy to meet minimum length, maximum age and reuse-prevention requirements."},
+    {"Id":"CA-AWS-ACCESS-KEY-AGE","Service":"AWS","Level":"Passive","Category":"identity","Remediation":"Disable and replace active IAM user access keys older than the configured maximum age."},
+    {"Id":"CA-AWS-TRAIL-PROTECTION","Service":"AWS","Level":"Passive","Category":"logging","Remediation":"Enable multi-region CloudTrail and log-file validation on a retained trail."},
+    {"Id":"CA-AWS-SG-PUBLIC","Service":"AWS","Level":"Passive","Category":"network","Remediation":"Remove public administrative security-group ingress; retain only explicitly approved public ports."},
+    {"Id":"CA-AWS-VPC-FLOW-LOGS","Service":"AWS","Level":"Passive","Category":"logging","Remediation":"Enable an active, successfully delivering VPC Flow Log for every in-scope VPC."},
     {"Id":"CA-AZ-001","Service":"Azure","Level":"Passive","Category":"runtime","Remediation":"Install Azure CLI and authenticate with a read-only subscription role."},
     {"Id":"CA-AZ-002","Service":"Azure","Level":"Passive","Category":"identity","Remediation":"Restore read-only subscription access and verify the selected subscription."},
     {"Id":"CA-AZ-ACTIVITY","Service":"Azure","Level":"Passive","Category":"logging","Remediation":"Configure and test activity-log alerts for high-impact control-plane events."},
+    {"Id":"CA-AZ-ROLE","Service":"Azure","Level":"Passive","Category":"identity","Remediation":"Review privileged role assignments and allow only explicitly approved principal object IDs."},
+    {"Id":"CA-AZ-STORAGE-NETWORK","Service":"Azure","Level":"Passive","Category":"network","Remediation":"Set each storage account network default action to Deny and approve only required private or firewall paths."},
+    {"Id":"CA-AZ-KEYVAULT-PURGE","Service":"Azure","Level":"Passive","Category":"recovery","Remediation":"Enable purge protection on every in-scope Key Vault."},
     {"Id":"CA-GCP-001","Service":"GCP","Level":"Passive","Category":"runtime","Remediation":"Install gcloud and authenticate with a read-only project role."},
     {"Id":"CA-GCP-002","Service":"GCP","Level":"Passive","Category":"identity","Remediation":"Restore read-only project access and verify the selected project."},
     {"Id":"CA-GCP-LOGGING","Service":"GCP","Level":"Passive","Category":"logging","Remediation":"Create a user-managed central logging sink with protected retention."},
+    {"Id":"CA-GCP-IAM-PRIMITIVE","Service":"GCP","Level":"Passive","Category":"identity","Remediation":"Remove primitive IAM roles or allow only explicitly approved members while migrating to least-privilege roles."},
+    {"Id":"CA-GCP-AUDIT-LOGS","Service":"GCP","Level":"Passive","Category":"logging","Remediation":"Configure allServices audit logging for every log type required by the baseline."},
+    {"Id":"CA-GCP-SA-KEY-AGE","Service":"GCP","Level":"Passive","Category":"identity","Remediation":"Disable and replace user-managed service-account keys older than the configured maximum age."},
+    {"Id":"CA-GCP-OSLOGIN","Service":"GCP","Level":"Passive","Category":"identity","Remediation":"Enable OS Login in project common instance metadata and validate required exceptions separately."},
     {"Id":"CA-TS-001","Service":"Tailscale","Level":"Passive","Category":"identity","Remediation":"Provide a short-lived read-only API token outside the repository and verify tailnet scope."},
     {"Id":"CA-M365-001","Service":"M365","Level":"Passive","Category":"identity","Remediation":"Use a least-privilege Microsoft Graph token and confirm tenant read access."},
     {"Id":"CA-ENTRA-001","Service":"Entra","Level":"Passive","Category":"identity","Remediation":"Restrict self-service email subscriptions in the tenant authorization policy."},
@@ -54,6 +70,7 @@
     {"Id":"CA-VPS-000","Service":"VPS","Level":"Formal","Category":"scope","Remediation":"Declare one explicitly authorized VPS target."},
     {"Id":"CA-VPS-001","Service":"VPS","Level":"Passive","Category":"runtime","Remediation":"Install OpenSSH client before running host checks."},
     {"Id":"CA-VPS-002","Service":"VPS","Level":"Passive","Category":"identity","Remediation":"Restore read-only SSH access using an existing approved identity."},
-    {"Id":"CA-VPS-PORT-22","Service":"VPS","Level":"Active","Category":"network","Remediation":"Review the declared SSH exposure and firewall policy."}
+    {"Id":"CA-VPS-PORT-22","Service":"VPS","Level":"Active","Category":"network","Remediation":"Review the declared SSH exposure and firewall policy."},
+    {"Id":"CA-DNS-BASELINE","Service":"Domain","Level":"Passive","Category":"dns","Remediation":"Review desired and observed DNS RRsets in the change plan; approve changes in the provider console and reassess."}
   ]
 }

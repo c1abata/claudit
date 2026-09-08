@@ -41,6 +41,7 @@
             "RoleManagement.ReadWrite.Directory",
             "User.ReadWrite.All"
         ],
+        "RequiredActivityLogCategories": ["Administrative"],
         "RequireStorageDefaultDeny": false,
         "RequireKeyVaultPurgeProtection": true
     },
@@ -51,7 +52,12 @@
         "MaxPasswordAgeDays": 90,
         "PasswordReusePrevention": 24,
         "MaxAccessKeyAgeDays": 90,
-        "RequireVpcFlowLogs": true
+        "RequireVpcFlowLogs": true,
+        "RequireRootMfa": true,
+        "RequireMultiRegionCloudTrail": true,
+        "RequireCloudTrailLogFileValidation": true,
+        "AllowedPublicIngressPorts": [80, 443],
+        "BlockPublicAdministrativeIngress": true
     },
     "GCP": {
         "_comment": "Read-only gcloud checks. Project/account/organization can be passed by wizard or CLI; Organization is optional.",
@@ -77,6 +83,13 @@
         "Subdomains": ["www", "autodiscover", "mail", "vpn", "portal", "admin", "dev", "staging"],
         "RequireDnssec": false,
         "DkimSelectors": ["default", "google", "selector1", "selector2", "k1", "s1", "s2", "mail"],
+        "Resolver": {
+            "Name": "Cloudflare public DNS-over-HTTPS",
+            "Endpoint": "https://cloudflare-dns.com/dns-query",
+            "Private": false,
+            "TimeoutSeconds": 10
+        },
+        "ExpectedRecords": [],
         "EnableDnsx": false,
         "DnsxBinary": "dnsx",
         "DnsxRateLimit": 100,

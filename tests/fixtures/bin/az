@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Symbolic Azure CLI: never contacts Azure.
+set -euo pipefail
+args="$*"
+state="${CLAUDIT_AZURE_FIXTURE:-healthy}"
+if [[ "$args" == *"account show"* ]]; then
+    case "$state" in
+        healthy|insecure|oversized) printf '%s\n' '{"id":"00000000-0000-0000-0000-000000000001","tenantId":"00000000-0000-0000-0000-000000000002"}' ;;
+        malformed) printf '%s\n' '{"unexpected":true}' ;;
+        denied) exit 1 ;;
+        *) exit 64 ;;
+    esac
+elif [[ "$args" == *"resource list"* ]]; then
+    printf '%s\n' '["/subscriptions/fixture/resources/one"]'
+elif [[ "$args" == *"monitor activity-log alert list"* ]]; then
+    case "$state" in
+        healthy) printf '%s\n' '[{"name":"administrative-alert","properties":{"enabled":true,"scopes":["/subscriptions/00000000-0000-0000-0000-000000000001"],"condition":{"allOf":[{"field":"category","equals":"Administrative"}]},"actions":{"actionGroups":[{"actionGroupId":"/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/ops/providers/microsoft.insights/actionGroups/security"}]}}}]' ;;
+        insecure) printf '%s\n' '[{"name":"disabled-alert","properties":{"enabled":false,"scopes":["/subscriptions/00000000-0000-0000-0000-000000000001"],"condition":{"allOf":[{"field":"category","equals":"Administrative"}]},"actions":{"actionGroups":[]}}}]' ;;
+        oversized) jq -nc '[range(0;501) | {name:("alert-" + tostring),properties:{enabled:true,scopes:["/subscriptions/00000000-0000-0000-0000-000000000001"],condition:{allOf:[{field:"category",equals:"Administrative"}]},actions:{actionGroups:[{actionGroupId:"/subscriptions/fixture/actionGroups/security"}]}}}]' ;;
+        malformed) printf '%s\n' '{}' ;;
+        denied) exit 1 ;;
+        *) exit 64 ;;
+    esac
+elif [[ "$args" == *"role assignment list"* ]]; then
+    case "$state" in healthy) printf '%s\n' '[]' ;; insecure) printf '%s\n' '[{"roleDefinitionName":"Owner","principalId":"unapproved"}]' ;; oversized) jq -nc '[range(0;501) | {roleDefinitionName:"Reader",principalId:("principal-" + tostring)}]' ;; malformed) printf '%s\n' '[{"roleDefinitionName":1}]' ;; denied) exit 1 ;; *) exit 64 ;; esac
+elif [[ "$args" == *"storage account list"* ]]; then
+    case "$state" in healthy) printf '%s\n' '[{"networkRuleSet":{"defaultAction":"Deny"}}]' ;; insecure) printf '%s\n' '[{"networkRuleSet":{"defaultAction":"Allow"}}]' ;; oversized) jq -nc '[range(0;501) | {networkRuleSet:{defaultAction:"Deny"}}]' ;; malformed) printf '%s\n' '[{}]' ;; denied) exit 1 ;; *) exit 64 ;; esac
+elif [[ "$args" == *"keyvault list"* ]]; then
+    case "$state" in healthy) printf '%s\n' '[{"properties":{"enablePurgeProtection":true}}]' ;; insecure) printf '%s\n' '[{"properties":{"enablePurgeProtection":false}}]' ;; oversized) jq -nc '[range(0;501) | {properties:{enablePurgeProtection:true}}]' ;; malformed) printf '%s\n' '[{"properties":{}}]' ;; denied) exit 1 ;; *) exit 64 ;; esac
+else exit 64; fi

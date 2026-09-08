@@ -39,15 +39,25 @@ if ! command -v systemctl >/dev/null 2>&1; then
   echo "claudit: systemd/systemctl is required." >&2
   exit 69
 fi
-if ! command -v bash >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-  echo "claudit: bash, jq and curl are required before installation." >&2
+required_commands=(bash jq curl python3 dig ssh aws az gcloud)
+missing_commands=()
+for required_command in "${required_commands[@]}"; do
+  command -v "${required_command}" >/dev/null 2>&1 || missing_commands+=("${required_command}")
+done
+if [[ ${#missing_commands[@]} -gt 0 ]]; then
+  echo "claudit: required prerequisites are missing: ${missing_commands[*]}." >&2
+  echo 'claudit: install jq curl python3 dnsutils openssh-client, AWS CLI v2, Azure CLI and Google Cloud CLI before installation.' >&2
+  exit 69
+fi
+if ! aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
+  echo 'claudit: AWS CLI v2 is required before installation.' >&2
   exit 69
 fi
 if [[ ! -f "${source_root}/claudit.sh" || ! -f "${source_root}/service/claudit.service" ]]; then
   echo "claudit: run this installer from a complete Claudit source tree." >&2
   exit 66
 fi
-if [[ ! -x "${source_root}/service/claudit-service.sh" || ! -f "${source_root}/config/runtime-control-catalog.json" ]]; then
+if [[ ! -x "${source_root}/service/claudit-service.sh" || ! -f "${source_root}/service/dashboard.py" || ! -f "${source_root}/config/runtime-control-catalog.json" ]]; then
   echo "claudit: Bash runtime service launcher or control catalog is missing." >&2
   exit 66
 fi
@@ -55,6 +65,7 @@ if ! bash -n "${source_root}/claudit.sh" "${source_root}/lib/"*.sh "${source_roo
   echo "claudit: source tree has a Bash syntax error." >&2
   exit 65
 fi
+python3 -m py_compile "${source_root}/service/dashboard.py" || { echo 'claudit: dashboard has a Python syntax error.' >&2; exit 65; }
 jq -e '.Version | type == "string"' "${source_root}/config/runtime-control-catalog.json" >/dev/null || { echo 'claudit: runtime control catalog is invalid.' >&2; exit 65; }
 if [[ ${dry_run} -eq 1 ]]; then
   echo 'claudit: deployment dry-run passed; no host state was changed.'
@@ -107,9 +118,12 @@ fi
 
 if [[ -n "${legacy_baseline_backup}" ]]; then
   merged_baseline="${upgrade_backup}/merged-baseline.json"
-  # Preserve a pre-Bash baseline verbatim. The Bash core treats baselines as
-  # policy input and never mutates operator data during an upgrade.
-  install -o root -g claudit -m 0640 "${legacy_baseline_backup}" "${merged_baseline}"
+  # Add newly shipped keys while preserving every existing operator value.
+  # jq object multiplication merges nested objects; legacy arrays and scalars
+  # deliberately replace defaults instead of being combined implicitly.
+  jq -s '.[0] * .[1]' "${source_root}/config/baseline.json" "${legacy_baseline_backup}" >"${merged_baseline}"
+  chown root:claudit "${merged_baseline}"
+  chmod 0640 "${merged_baseline}"
 fi
 
 # Older wizard runs lived below /opt/claudit/reports. Copy regular files into

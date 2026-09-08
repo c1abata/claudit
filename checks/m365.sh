@@ -1,29 +1,55 @@
 #!/usr/bin/env bash
 ca_graph_get() { curl --fail --silent --show-error --max-time 20 -H "Authorization: Bearer $1" -H 'Accept: application/json' "https://graph.microsoft.com/v1.0$2"; }
+ca_graph_get_all() {
+    local token="$1" path="$2" response next page=0 values='[]'
+    while :; do
+        page=$((page + 1))
+        response="$(ca_graph_get "$token" "$path")" || return 1
+        jq -e '(.value | type == "array") and ((.["@odata.nextLink"]? // null) | type == "string" or type == "null")' >/dev/null 2>&1 <<<"$response" || return 2
+        values="$(jq -cn --argjson previous "$values" --argjson current "$response" '$previous + $current.value')"
+        next="$(jq -r '.["@odata.nextLink"] // empty' <<<"$response")"
+        [[ -z "$next" ]] && break
+        [[ "$next" == https://graph.microsoft.com/v1.0/* ]] || return 2
+        (( page < 10 )) || return 3
+        path="${next#https://graph.microsoft.com/v1.0}"
+    done
+    jq -cn --argjson values "$values" '{value:$values}'
+}
 ca_check_m365() {
-    local token response
+    local token response graph_status
     if [[ "$CLAUDIT_CONFIRM_CONNECTION" -ne 1 ]]; then ca_finding CA-M365-001 M365 unknown info 'Microsoft 365 connection not confirmed' 'Use --confirm-tenant-connection to permit Microsoft Graph calls.'; return; fi
     token="${CLAUDIT_GRAPH_TOKEN:-}"
-    if [[ -z "$token" ]] && ca_command_exists az; then token="$(az account get-access-token --resource-type ms-graph --query accessToken -o tsv 2>/dev/null || true)"; fi
+    if [[ -z "$token" ]] && ca_command_exists az; then token="$(ca_run_cli az account get-access-token --resource-type ms-graph --query accessToken -o tsv 2>/dev/null || true)"; fi
     if [[ -z "$token" ]]; then ca_finding CA-M365-001 M365 unknown high 'Microsoft Graph token unavailable' 'Set CLAUDIT_GRAPH_TOKEN or authenticate with Azure CLI; no secret is stored by Claudit.'; return; fi
     response="$(ca_graph_get "$token" "/organization?\$select=id,displayName" 2>/dev/null || true)"
     if jq -e '.value | length > 0' >/dev/null 2>&1 <<<"$response"; then ca_finding CA-M365-001 M365 pass info 'Microsoft Graph organization access verified' 'Microsoft Graph returned the authorized organization.'; else ca_finding CA-M365-001 M365 unknown high 'Microsoft Graph organization unavailable' 'Graph organization query failed or is not authorized.'; return; fi
+    if ca_selected M365 || ca_selected Entra; then
     response="$(ca_graph_get "$token" '/policies/authorizationPolicy' 2>/dev/null || true)"
     if jq -e '.allowedToSignUpEmailBasedSubscriptions == false' >/dev/null 2>&1 <<<"$response"; then ca_finding CA-ENTRA-001 Entra pass info 'Self-service email subscriptions restricted' 'Authorization policy disables email-based self-service subscriptions.'; else ca_finding CA-ENTRA-001 Entra unknown medium 'Authorization policy not verified' 'The policy is unavailable or does not show the expected restrictive value.'; fi
-    response="$(ca_graph_get "$token" "/identity/conditionalAccess/policies?\$select=id,state" 2>/dev/null || true)"
-    if jq -e '[.value[]? | select(.state == "enabled")] | length > 0' >/dev/null 2>&1 <<<"$response"; then ca_finding CA-ENTRA-CA Entra pass info 'Conditional Access enabled' 'At least one enabled Conditional Access policy was returned.'; else ca_finding CA-ENTRA-CA Entra unknown high 'Conditional Access not verified' 'No enabled Conditional Access policy was returned or scope is insufficient.'; fi
+    if response="$(ca_graph_get_all "$token" "/identity/conditionalAccess/policies?\$select=id,state" 2>/dev/null)"; then
+        if jq -e '[.value[] | select(.state == "enabled")] | length > 0' >/dev/null <<<"$response"; then ca_finding CA-ENTRA-CA Entra pass info 'Conditional Access enabled' 'At least one enabled Conditional Access policy was returned from the complete bounded collection.'; else ca_finding CA-ENTRA-CA Entra unknown high 'Conditional Access not verified' 'The complete policy collection contains no enabled Conditional Access policy.'; fi
+    else
+        graph_status=$?
+        case "$graph_status" in
+            1) ca_finding CA-ENTRA-CA Entra unknown high 'Conditional Access collection unavailable' 'Microsoft Graph did not return every Conditional Access policy page.' ;;
+            2) ca_finding CA-ENTRA-CA Entra error high 'Conditional Access response malformed' 'Microsoft Graph returned an invalid policy page or an untrusted continuation URL.' ;;
+            3) ca_finding CA-ENTRA-CA Entra unknown high 'Conditional Access collection incomplete' 'Conditional Access pagination exceeded the ten-page safety bound.' ;;
+        esac
+    fi
+    fi
+    if ca_selected M365 || ca_selected SharePoint || ca_selected OneDrive; then
     response="$(ca_graph_get "$token" '/admin/sharepoint/settings' 2>/dev/null || true)"
-    if jq -e . >/dev/null 2>&1 <<<"$response"; then
+    if jq -e 'type == "object" and (.error == null) and (.sharingCapability | type == "string")' >/dev/null 2>&1 <<<"$response"; then
         local expected_sharing actual_sharing expected_rank actual_rank
         expected_sharing="$(ca_baseline_get '.SharePoint.MaxSharingCapability' | tr -d '"')"
         actual_sharing="$(jq -r '.sharingCapability // empty' <<<"$response")"
         case "$expected_sharing" in disabled) expected_rank=0;; existingExternalUserSharingOnly) expected_rank=1;; externalUserSharingOnly) expected_rank=2;; externalUserAndGuestSharing) expected_rank=3;; *) expected_rank=99;; esac
         case "$actual_sharing" in disabled) actual_rank=0;; existingExternalUserSharingOnly) actual_rank=1;; externalUserSharingOnly) actual_rank=2;; externalUserAndGuestSharing) actual_rank=3;; *) actual_rank=99;; esac
-        if (( actual_rank <= expected_rank )); then ca_finding CA-SPO-SHARING SharePoint pass info 'SharePoint sharing within baseline' "Tenant sharing capability '$actual_sharing' does not exceed baseline '$expected_sharing'."; else ca_finding CA-SPO-SHARING SharePoint fail high 'SharePoint sharing exceeds baseline' "Tenant sharing capability '$actual_sharing' exceeds baseline '$expected_sharing'."; fi
-        if ca_baseline_enabled '.SharePoint.BlockLegacyAuthProtocols'; then if jq -e '.isLegacyAuthProtocolsEnabled == false' >/dev/null <<<"$response"; then ca_finding CA-SPO-LEGACY SharePoint pass info 'SharePoint legacy authentication restricted' 'SharePoint settings report legacy authentication disabled.'; else ca_finding CA-SPO-LEGACY SharePoint fail medium 'SharePoint legacy authentication enabled' 'Tenant settings do not confirm that legacy authentication is disabled.'; fi; else ca_finding CA-SPO-LEGACY SharePoint info info 'SharePoint legacy-auth control disabled' 'Baseline does not require this control.'; fi
-        if ca_baseline_enabled '.SharePoint.RequireReauthAcceptingUserMatchesInvited'; then if jq -e '.isRequireAcceptingUserToMatchInvitedUserEnabled == true' >/dev/null <<<"$response"; then ca_finding CA-SPO-INVITE SharePoint pass info 'Guest acceptance identity enforced' 'SharePoint requires the accepting user to match the invited user.'; else ca_finding CA-SPO-INVITE SharePoint fail medium 'Guest acceptance identity not enforced' 'SharePoint does not confirm invited-user identity enforcement.'; fi; else ca_finding CA-SPO-INVITE SharePoint info info 'SharePoint guest-match control disabled' 'Baseline does not require this control.'; fi
-        if ca_baseline_enabled '.OneDrive.RestrictUnmanagedDeviceSync'; then if jq -e '.isUnmanagedSyncAppForTenantRestricted == true' >/dev/null <<<"$response"; then ca_finding CA-OD-SYNC OneDrive pass info 'OneDrive unmanaged sync restricted' 'Tenant settings restrict sync on unmanaged devices.'; else ca_finding CA-OD-SYNC OneDrive fail high 'OneDrive unmanaged sync unrestricted' 'Tenant settings do not confirm unmanaged-device sync restriction.'; fi; else ca_finding CA-OD-SYNC OneDrive info info 'OneDrive unmanaged-sync control disabled' 'Baseline does not require this control.'; fi
-        if ca_baseline_enabled '.OneDrive.RequireBlockedSyncFileExtensions'; then if jq -e '(.excludedFileExtensionsForSyncApp // []) | length > 0' >/dev/null <<<"$response"; then ca_finding CA-OD-EXTENSIONS OneDrive pass info 'OneDrive sync file extensions blocked' 'Tenant settings contain blocked sync file extensions.'; else ca_finding CA-OD-EXTENSIONS OneDrive fail medium 'OneDrive sync file extensions unrestricted' 'No blocked sync file extensions were returned.'; fi; else ca_finding CA-OD-EXTENSIONS OneDrive info info 'OneDrive extension control disabled' 'Baseline does not require this control.'; fi
+        if (( actual_rank == 99 || expected_rank == 99 )); then ca_finding CA-SPO-SHARING SharePoint unknown medium 'SharePoint sharing value unrecognized' 'The expected or observed sharing enum cannot be evaluated.'; elif (( actual_rank <= expected_rank )); then ca_finding CA-SPO-SHARING SharePoint pass info 'SharePoint sharing within baseline' "Tenant sharing capability '$actual_sharing' does not exceed baseline '$expected_sharing'."; else ca_finding CA-SPO-SHARING SharePoint fail high 'SharePoint sharing exceeds baseline' "Tenant sharing capability '$actual_sharing' exceeds baseline '$expected_sharing'."; fi
+        if ca_baseline_enabled '.SharePoint.BlockLegacyAuthProtocols'; then if ! jq -e '.isLegacyAuthProtocolsEnabled | type == "boolean"' >/dev/null <<<"$response"; then ca_finding CA-SPO-LEGACY SharePoint unknown medium 'Setting unavailable' 'Graph omitted or malformed isLegacyAuthProtocolsEnabled.'; elif jq -e '.isLegacyAuthProtocolsEnabled == false'  >/dev/null <<<"$response"; then ca_finding CA-SPO-LEGACY SharePoint pass info 'SharePoint legacy authentication restricted' 'SharePoint settings report legacy authentication disabled.'; else ca_finding CA-SPO-LEGACY SharePoint fail medium 'SharePoint legacy authentication enabled' 'Tenant settings do not confirm that legacy authentication is disabled.'; fi; else ca_finding CA-SPO-LEGACY SharePoint info info 'SharePoint legacy-auth control disabled' 'Baseline does not require this control.'; fi
+        if ca_baseline_enabled '.SharePoint.RequireReauthAcceptingUserMatchesInvited'; then if ! jq -e '.isRequireAcceptingUserToMatchInvitedUserEnabled | type == "boolean"' >/dev/null <<<"$response"; then ca_finding CA-SPO-INVITE SharePoint unknown medium 'Setting unavailable' 'Graph omitted or malformed isRequireAcceptingUserToMatchInvitedUserEnabled.'; elif jq -e '.isRequireAcceptingUserToMatchInvitedUserEnabled == true'  >/dev/null <<<"$response"; then ca_finding CA-SPO-INVITE SharePoint pass info 'Guest acceptance identity enforced' 'SharePoint requires the accepting user to match the invited user.'; else ca_finding CA-SPO-INVITE SharePoint fail medium 'Guest acceptance identity not enforced' 'SharePoint does not confirm invited-user identity enforcement.'; fi; else ca_finding CA-SPO-INVITE SharePoint info info 'SharePoint guest-match control disabled' 'Baseline does not require this control.'; fi
+        if ca_baseline_enabled '.OneDrive.RestrictUnmanagedDeviceSync'; then if ! jq -e '.isUnmanagedSyncAppForTenantRestricted | type == "boolean"' >/dev/null <<<"$response"; then ca_finding CA-OD-SYNC OneDrive unknown medium 'Setting unavailable' 'Graph omitted or malformed isUnmanagedSyncAppForTenantRestricted.'; elif jq -e '.isUnmanagedSyncAppForTenantRestricted == true'  >/dev/null <<<"$response"; then ca_finding CA-OD-SYNC OneDrive pass info 'OneDrive unmanaged sync restricted' 'Tenant settings restrict sync on unmanaged devices.'; else ca_finding CA-OD-SYNC OneDrive fail high 'OneDrive unmanaged sync unrestricted' 'Tenant settings do not confirm unmanaged-device sync restriction.'; fi; else ca_finding CA-OD-SYNC OneDrive info info 'OneDrive unmanaged-sync control disabled' 'Baseline does not require this control.'; fi
+        if ca_baseline_enabled '.OneDrive.RequireBlockedSyncFileExtensions'; then if ! jq -e '.excludedFileExtensionsForSyncApp | type == "array"' >/dev/null <<<"$response"; then ca_finding CA-OD-EXTENSIONS OneDrive unknown medium 'Blocked extensions unavailable' 'Graph omitted or malformed the blocked extension list.'; elif jq -e '.excludedFileExtensionsForSyncApp | length > 0' >/dev/null <<<"$response"; then ca_finding CA-OD-EXTENSIONS OneDrive pass info 'OneDrive sync file extensions blocked' 'Tenant settings contain blocked sync file extensions.'; else ca_finding CA-OD-EXTENSIONS OneDrive fail medium 'OneDrive sync file extensions unrestricted' 'No blocked sync file extensions were returned.'; fi; else ca_finding CA-OD-EXTENSIONS OneDrive info info 'OneDrive extension control disabled' 'Baseline does not require this control.'; fi
         local min_retention retention
         min_retention="$(ca_baseline_get '.OneDrive.MinDeletedUserRetentionDays')"
         retention="$(jq -r '.deletedUserPersonalSiteRetentionPeriodInDays // empty' <<<"$response")"
@@ -36,6 +62,9 @@ ca_check_m365() {
         ca_finding CA-OD-EXTENSIONS OneDrive unknown medium 'OneDrive extension setting unavailable' 'Graph SharePoint administration scope is absent or the endpoint is unavailable.'
         ca_finding CA-OD-RETENTION OneDrive unknown medium 'OneDrive retention setting unavailable' 'Graph SharePoint administration scope is absent or the endpoint is unavailable.'
     fi
+    fi
+    if ca_selected M365 || ca_selected OneDrive; then
     response="$(ca_graph_get "$token" "/drives?\$top=1" 2>/dev/null || true)"
-    if jq -e . >/dev/null 2>&1 <<<"$response"; then ca_finding CA-OD-ACCESS OneDrive pass info 'OneDrive API scope verified' 'Microsoft Graph returned the authorized drive collection.'; else ca_finding CA-OD-ACCESS OneDrive unknown medium 'OneDrive API scope unavailable' 'Graph could not retrieve the authorized drive collection.'; fi
+    if jq -e '.value | type == "array"' >/dev/null 2>&1 <<<"$response"; then ca_finding CA-OD-ACCESS OneDrive pass info 'OneDrive API scope verified' 'Microsoft Graph returned the authorized drive collection.'; else ca_finding CA-OD-ACCESS OneDrive unknown medium 'OneDrive API scope unavailable' 'Graph could not retrieve the authorized drive collection.'; fi
+    fi
 }

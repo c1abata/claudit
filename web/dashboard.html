@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1821">
+<link rel="icon" type="image/png" href="/assets/icons/logo/favicon.png">
+<link rel="stylesheet" href="/assets/dashboard.css">
+<script src="/assets/dashboard.js" defer></script>
+<title>Claudit Cockpit</title>
+<link rel="stylesheet" href="/assets/operator-reports.css">
+<script src="/assets/operator-reports.js" defer></script>
+<link rel="stylesheet" href="/assets/workspace.css">
+<script src="/assets/workspace.js" defer></script>
+</head>
+<body data-request-token="__CLAUDIT_REQUEST_TOKEN__">
+<div class="shell">
+  <aside class="sidebar" aria-label="Primary navigation">
+    <div class="brand-row">
+      <img class="brand-logo" src="/assets/icons/logo/claudit-logo-96.png" alt="" width="36" height="36">
+      <div><p class="brand-name">Claudit</p><div class="brand-mode">Local security cockpit</div></div>
+    </div>
+    <nav class="nav" role="tablist" aria-label="Cockpit sections">
+      <button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="overview" data-tab="overview">Overview</button>
+      <button id="tab-operations" type="button" role="tab" aria-selected="false" aria-controls="operations" data-tab="operations" tabindex="-1">Operations</button>
+      <button id="tab-reports" type="button" role="tab" aria-selected="false" aria-controls="reports" data-tab="reports" tabindex="-1">Reports</button>
+    </nav>
+    <div class="sidebar-foot">Private operator console · read-only audit controls</div>
+  </aside>
+
+  <main class="workspace">
+    <div class="workspace-inner">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Security operations / local</p>
+          <h1>Cloud audit cockpit</h1>
+          <p class="topbar-copy">Plan bounded checks, follow execution, and review audit evidence without leaving the local console.</p>
+        </div>
+        <div id="connectionState" class="connection" data-state="online" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span><span id="serverState">Connected</span>
+        </div>
+      </header>
+
+      <section class="panel session-panel" aria-labelledby="sessionHeading">
+  <div class="panel-head"><div><p class="eyebrow">Private assessment workspace</p><h2 id="sessionHeading">Work sessions & contextual guidance</h2><p>Keep scope, known configuration, observations and decisions together. Guidance uses your saved evidence locally.</p></div></div>
+  <div class="panel-body">
+    <div class="form-grid">
+      <label class="field"><span class="field-label">Saved work session</span><select id="sessionSelect"><option value="">Create a work session below</option></select></label>
+      <label class="field"><span class="field-label">New session title</span><input id="sessionTitle" maxlength="120" placeholder="Production DNS and cloud review"></label>
+    </div>
+    <details><summary>Known configuration & DNS plan</summary>
+      <p>Choose services and scope in New operation below, then save a session. Its scope and baseline remain fixed for repeatable assessments. Create another session when scope changes.</p>
+      <p id="dnsResolverContext" class="hint"></p>
+      <label class="field"><span class="field-label">Expected DNS records — one name | type | value per line</span><textarea id="sessionDns" rows="4" placeholder="example.com | A | 203.0.113.10"></textarea></label>
+      <div class="form-grid"><label class="field"><span class="field-label">Import a read-only provider DNS export</span><select id="sessionDnsProvider"><option value="route53">AWS Route 53 JSON</option><option value="azure">Azure DNS JSON</option><option value="gcp">Google Cloud DNS JSON</option><option value="cloudflare">Cloudflare DNS JSON</option></select></label><label class="field"><span class="field-label">Provider export file</span><input id="sessionDnsFile" type="file" accept="application/json,.json"></label></div>
+      <div class="action-bar"><button id="sessionDnsImport" type="button">Load DNS export into known configuration</button></div>
+      <p class="hint">Repeat a name/type for multiple values. An empty value means expected absence. Use the DNS text representation, including a final dot on host targets and quotes in TXT records. Maximum 50 RRsets. Differences produce a reviewable plan; provider changes are applied separately.</p>
+      <label class="field"><span class="field-label">Expected control results — one control ID | status per line</span><textarea id="sessionExpected" rows="2" placeholder="CA-AWS-TRAIL | pass"></textarea></label>
+    </details>
+    <details><summary>Baseline capability map</summary><p class="hint">Only entries marked enforced are evaluated against the baseline. Scope-only entries constrain collection; unsupported entries remain policy context and never become passing checks.</p><div id="baselineCapabilities"></div></details>
+    <div class="action-bar"><button id="sessionCreate" type="button">Save new session from scope</button><button id="sessionReload" type="button">Refresh sessions</button><button id="sessionExport" type="button">Export selected</button><button id="sessionArchive" type="button">Archive selected</button><button id="sessionDelete" type="button">Delete archived</button><button id="sessionQuarantine" type="button">Quarantine unreadable</button></div>
+    <p id="sessionContext">No session selected.</p>
+    <details><summary>Guided assessment plan</summary><div id="sessionPlan"></div></details>
+    <div class="form-grid">
+      <label class="field"><span class="field-label">Session assessment level</span><select id="sessionLevel"><option value="formal">Formal — local validation</option><option value="passive">Passive — read-only DNS and APIs</option><option value="active">Active — bounded HTTPS / SSH probes</option></select></label>
+      <label class="field"><span><input type="checkbox" id="sessionConnection"> I authorize DNS / provider reads for this scope</span></label>
+      <label class="field"><span><input type="checkbox" id="sessionActive"> I authorize active probes for this scope</span></label>
+    </div>
+    <div class="action-bar"><button id="sessionRun" type="button">Run session assessment</button></div>
+    <label class="field"><span class="field-label">Ask about the checks, a finding ID, DNS, or the next step</span><input id="sessionQuestion" maxlength="2000" placeholder="What should I check next?"></label>
+    <div class="action-bar"><button id="sessionAsk" type="button">Ask from evidence</button><button id="sessionNote" type="button">Save as work note</button></div>
+    <p id="sessionStatus" role="status" aria-live="polite"></p><div id="sessionAnswer"></div>
+    <details><summary>Session history</summary><div id="sessionHistory"></div></details>
+  </div>
+</section>
+<section id="overview" class="tab" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="metrics" aria-label="Audit summary">
+          <div class="metric"><div class="metric-value" id="mReports">0</div><div class="metric-label">Audit reports</div></div>
+          <div class="metric"><div class="metric-value" id="mRuns">0</div><div class="metric-label">Operations</div></div>
+          <div class="metric" data-tone="accent"><div class="metric-value" id="mRunning">0</div><div class="metric-label">Running</div></div>
+          <div class="metric" data-tone="warning"><div class="metric-value" id="mProblems">0</div><div class="metric-label">Latest problems</div></div>
+          <div class="metric" data-tone="warning"><div class="metric-value" id="mNotEvaluated">0</div><div class="metric-label">Not evaluated</div></div>
+          <div class="metric" data-tone="danger"><div class="metric-value" id="mErrors">0</div><div class="metric-label">Execution errors</div></div>
+        </div>
+
+        <section id="resultsOverview" class="results-overview"><div class="results-overview-head"><div><p class="eyebrow">Latest assessment</p><h2>Results at a glance</h2></div><button id="openLatestReport" type="button" class="quiet" hidden>Open analysis</button></div><div id="resultsOverviewContent" class="results-overview-content">Loading latest results…</div></section>
+
+        <div class="dashboard-grid">
+          <section class="panel" aria-labelledby="operationPlanTitle">
+            <div class="panel-head"><div><h2 id="operationPlanTitle">New operation</h2><p>Scope the audit before any provider connection is opened.</p></div></div>
+            <div class="panel-body">
+              <div class="config-section">
+                <div class="section-title"><h3>1. Execution policy</h3><span>Required</span></div>
+                <div class="form-grid compact">
+                  <label class="field"><span class="field-label">Mode</span><select id="opMode"><option value="preflight">Prerequisite check (no asset analysis)</option><option value="safe">Formal scope validation (no collection)</option><option value="audit">Read-only assessment</option></select></label>
+                  <label class="field"><span class="field-label">Control level</span><select id="controlLevel"><option>Formal</option><option selected>Passive</option><option>Active</option></select><span class="hint">Formal validates scope only. Passive collects public/read-only evidence. Active adds explicitly authorized bounded probes.</span></label>
+                  <label class="field"><span class="field-label">Report format</span><select id="format"><option>All</option><option>Html</option><option>Json</option><option>Markdown</option><option>Csv</option></select></label>
+                  <div class="field"><label class="field-label" for="retentionCount">Results to keep</label><div class="input-action"><input id="retentionCount" type="number" min="1" max="10000" list="retentionPresets" value="__CLAUDIT_RETENTION_COUNT__"><button id="saveRetention" type="button">Save</button></div><span class="hint">Completed runs only.</span><datalist id="retentionPresets"><option value="10"><option value="25"><option value="50"><option value="__CLAUDIT_RETENTION_COUNT__"><option value="250"><option value="500"><option value="1000"></datalist></div>
+                </div>
+              </div>
+
+              <div class="config-section">
+                <div class="section-title"><h3>2. Audit surface</h3><span>Select one or more</span></div>
+                <div id="serviceList" class="services" aria-label="Services"></div>
+              </div>
+
+              <details class="details" open>
+                <summary>Identity and provider context</summary>
+                <div class="details-content">
+                  <div class="form-grid">
+                    <div hidden><label class="field"><span class="field-label">Tenant label</span><input id="tenantName" value="Cloud tenant"></label></div>
+                    <div hidden><label class="field"><span class="field-label">Cloud</span><select id="environment"><option>Global</option><option>USGov</option><option>USGovDOD</option><option>China</option></select></label></div>
+                    <div hidden><label class="field"><span class="field-label">Run Pester</span><select id="runPester"><option value="false">No</option><option value="true">Yes</option></select></label></div>
+                    <div hidden><label class="field m365" hidden><span class="field-label">Microsoft auth</span><select id="authMode"><option value="Interactive">Delegated operator</option><option value="AppOnly">App-only certificate</option></select><span class="hint">Client secrets are not used.</span></label></div>
+                    <div hidden><label class="field m365 delegated" hidden><span class="field-label">Graph auth</span><select id="graphAuthMode"><option>DeviceCode</option><option>Browser</option></select></label></div>
+                    <div hidden><label class="field m365 apponly" hidden><span class="field-label">Tenant ID</span><input id="tenantId" placeholder="00000000-0000-0000-0000-000000000000"></label></div>
+                    <div hidden><label class="field m365 apponly" hidden><span class="field-label">Client ID</span><input id="clientId" placeholder="App registration ID"></label></div>
+                    <div hidden><label class="field m365 apponly" hidden><span class="field-label">Certificate thumbprint</span><input id="certificateThumbprint" placeholder="Local certificate thumbprint"></label></div>
+                    <label class="field m365 apponly" hidden><span class="field-label">Exchange organization</span><input id="organization" placeholder="contoso.onmicrosoft.com"></label>
+                    <label class="field azure" hidden><span class="field-label">Azure subscription</span><input id="azureSubscription" placeholder="Optional"></label>
+                    <div hidden><label class="field azure" hidden><span class="field-label">Azure tenant</span><input id="azureTenant" placeholder="Optional"></label></div>
+                    <label class="field aws" hidden><span class="field-label">AWS profile</span><input id="awsProfile" placeholder="Optional"></label>
+                    <label class="field aws" hidden><span class="field-label">AWS region</span><input id="awsRegion" placeholder="eu-west-1"></label>
+                    <label class="field gcp" hidden><span class="field-label">GCP project</span><input id="gcpProject" placeholder="Optional"></label>
+                    <div hidden><label class="field gcp" hidden><span class="field-label">GCP account</span><input id="gcpAccount" placeholder="Optional"></label></div>
+                    <div hidden><label class="field gcp" hidden><span class="field-label">GCP organization</span><input id="gcpOrganization" placeholder="Optional"></label></div>
+                    <label class="field tailscale" hidden><span class="field-label">Tailscale tailnet</span><input id="tailscaleTailnet" placeholder="example.com"></label>
+                    <div hidden><label class="field tailscale" hidden><span class="field-label">Tailscale token env</span><input id="tailscaleApiTokenEnv" value="TAILSCALE_API_TOKEN"></label></div>
+                    <div hidden><label class="field tailscale" hidden><span class="field-label">Tailscale auth</span><select id="tailscaleAuthScheme"><option>Auto</option><option>Basic</option><option>Bearer</option></select></label></div>
+                    <label class="field domain wide" hidden><span class="field-label">Root domain</span><input id="domain" placeholder="example.com"><span class="hint">Use one authorized root domain. Passive/Active assessments create domain evidence; Formal does not collect it.</span></label>
+                    <div hidden><label class="field domain wide" hidden><span class="field-label">Planned subdomains</span><input id="domainSubdomain" value="www,autodiscover,mail,vpn,portal,admin,dev,staging"></label></div>
+                    <label class="field vps" hidden><span class="field-label">VPS target</span><input id="vpsTarget" placeholder="host or user@host (required)"></label>
+                    <div hidden><label class="field vps" hidden><span class="field-label">VPS SSH user</span><input id="vpsSshUser" placeholder="Optional"></label></div>
+                    <div hidden><label class="field vps" hidden><span class="field-label">VPS SSH port</span><input id="vpsSshPort" value="22" inputmode="numeric"></label></div>
+                    <div hidden><label class="field vps" hidden><span class="field-label">VPS allowed ports</span><input id="vpsAllowedPublicPort" placeholder="80,443"></label></div>
+                    <div hidden><label class="field active vps" hidden><span class="field-label">Active VPS probe ports</span><input id="vpsProbePort" placeholder="22,443"><span class="hint">Explicit ports only; ranges are rejected.</span></label></div>
+                    <div hidden><label class="field active" hidden><span class="field-label">Active timeout (ms)</span><input id="activeTimeoutMs" value="3000" inputmode="numeric"></label></div>
+                    <label class="field active" hidden><span class="field-label">Authorize active probes</span><select id="confirmActiveProbes"><option value="false">No</option><option value="true">Yes, targets are authorized</option></select></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="details">
+                <summary>Authentication gates</summary>
+                <div class="details-content"><div id="authPlan" class="auth-plan"></div></div>
+              </details>
+
+              <label class="field"><span><input id="confirmTenantConnection" type="checkbox"> I authorize read-only DNS and provider connections for the declared scope</span></label>
+              <div class="action-bar">
+                <button class="primary" id="startOp" type="button">Start operation</button>
+                <button id="refreshAll" type="button">Refresh</button>
+                <span class="action-note">Use an existing read-only provider login on the server. Review missing access in the operation log.</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel activity-panel" aria-labelledby="activityTitle">
+            <div class="panel-head"><div><h2 id="activityTitle">Live activity</h2><p id="logTitle">No operation selected</p></div></div>
+            <div class="panel-body">
+              <div class="activity-summary">
+                <div class="activity-fact"><span>Latest run</span><strong id="latestRun">None</strong></div>
+                <div class="activity-fact"><span>Status</span><strong id="latestStatus">Idle</strong></div>
+              </div>
+              <pre id="logPane" class="log" aria-live="polite">Select an operation to inspect its output.</pre>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="operations" class="tab" role="tabpanel" aria-labelledby="tab-operations" hidden>
+        <div class="panel table-panel">
+          <div class="panel-head"><div><h2>Operations</h2><p>Execution history and process outcomes.</p></div></div>
+          <div class="panel-body"><div class="table-scroll"><table><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Services</th><th>Output</th><th>Log</th></tr></thead><tbody id="operationsBody"></tbody></table></div></div>
+        </div>
+      </section>
+
+      <section id="reports" class="tab" role="tabpanel" aria-labelledby="tab-reports" hidden>
+        <div class="panel table-panel">
+          <div class="panel-head"><div><h2>Report files</h2><p>Generated evidence, summaries, and exports.</p></div></div>
+          <div class="panel-body">
+            <div class="table-tools"><input id="reportFilter" aria-label="Filter reports" placeholder="Filter by name, path, status, or service"><button id="reloadReports" type="button">Refresh reports</button></div>
+            <div class="table-scroll"><table><thead><tr><th>File</th><th>Type</th><th>Last write</th><th>Signal</th><th>Size</th><th>Open</th></tr></thead><tbody id="reportsBody"></tbody></table></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

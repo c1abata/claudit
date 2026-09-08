@@ -16,6 +16,8 @@ config/*.profile.json
 # Local audit evidence and runtime state
 /reports/
 /dist/
+/output/
+/.playwright-cli/
 /test[0-9]*/
 /testacad*/
 /testv*/
