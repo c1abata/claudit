@@ -18,7 +18,8 @@ class DashboardReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
             self.assertTrue(cockpit.baseline_capabilities)
-            self.assertIn("unsupported", {item["State"] for item in cockpit.baseline_capabilities})
+            self.assertNotIn("unsupported", {item["State"] for item in cockpit.baseline_capabilities})
+            self.assertEqual({item["State"] for item in cockpit.baseline_capabilities}, {"enforced", "scope_only"})
             self.assertEqual(cockpit.dns_resolver["fallback"], "disabled")
 
     def test_dashboard_rejects_resolver_credentials(self) -> None:

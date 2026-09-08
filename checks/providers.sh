@@ -124,11 +124,57 @@ ca_check_aws() {
     else ca_finding CA-AWS-SG-PUBLIC AWS fail high 'Public administrative security-group ingress found' "Collected security groups contain $public_exposure public ingress rule(s) outside the configured allow-list."; fi
 }
 
+ca_az_graph_get_all() {
+    local url="$1" response next page=0 values='[]'
+    while :; do
+        page=$((page + 1))
+        response="$(ca_run_cli az rest --method get --url "$url" --output json 2>/dev/null)" || return 1
+        jq -e '(.value | type == "array") and ((.["@odata.nextLink"]? // null) | type == "string" or type == "null")' >/dev/null 2>&1 <<<"$response" || return 2
+        values="$(jq -cn --argjson previous "$values" --argjson current "$response" '$previous + $current.value')"
+        next="$(jq -r '.["@odata.nextLink"] // empty' <<<"$response")"
+        [[ -z "$next" ]] && break
+        [[ "$next" == https://graph.microsoft.com/v1.0/* ]] || return 2
+        (( page < 10 )) || return 3
+        url="$next"
+    done
+    jq -cn --argjson values "$values" '{value:$values}'
+}
+
+ca_check_azure_graph_roles() {
+    local provider_cap="$1" graph_url graph_sp graph_assignments graph_sp_id graph_status
+    graph_url='https://graph.microsoft.com/v1.0/servicePrincipals?%24filter=appId%20eq%20%2700000003-0000-0000-c000-000000000000%27%26%24select=id,appRoles'
+    graph_sp="$(ca_az_graph_get_all "$graph_url")" || {
+        graph_status=$?
+        [[ "$graph_status" == 2 ]] && ca_finding CA-AZ-GRAPH-APP-ROLES Azure error high 'Microsoft Graph service principal malformed' 'The service-principal response was malformed or used an untrusted continuation URL.' || ca_finding CA-AZ-GRAPH-APP-ROLES Azure unknown high 'Microsoft Graph service principal unavailable' 'Azure CLI could not collect the Microsoft Graph service principal and application roles.'
+        return
+    }
+    if ! jq -e '.value | length == 1 and (.[0].id | type == "string") and (.[0].appRoles | type == "array") and all(.[0].appRoles[]; (.id | type == "string") and (.value | type == "string"))' >/dev/null 2>&1 <<<"$graph_sp"; then
+        ca_finding CA-AZ-GRAPH-APP-ROLES Azure error high 'Microsoft Graph service principal malformed' 'Microsoft Graph did not return one service principal with a valid application-role map.'
+        return
+    fi
+    graph_sp_id="$(jq -r '.value[0].id' <<<"$graph_sp")"
+    graph_url="https://graph.microsoft.com/v1.0/servicePrincipals/$graph_sp_id/appRoleAssignedTo?%24select=id,principalId,appRoleId"
+    graph_assignments="$(ca_az_graph_get_all "$graph_url")" || {
+        graph_status=$?
+        [[ "$graph_status" == 2 ]] && ca_finding CA-AZ-GRAPH-APP-ROLES Azure error high 'Graph app-role response malformed' 'The assignment response was malformed or used an untrusted continuation URL.' || ca_finding CA-AZ-GRAPH-APP-ROLES Azure unknown high 'Graph app-role assignments unavailable' 'The complete bounded application-role assignment collection was unavailable.'
+        return
+    }
+    if ! jq -e 'all(.value[]; (.id | type == "string") and (.principalId | type == "string") and (.appRoleId | type == "string"))' >/dev/null 2>&1 <<<"$graph_assignments"; then
+        ca_finding CA-AZ-GRAPH-APP-ROLES Azure error high 'Graph app-role response malformed' 'One or more returned application-role assignments lack required identity fields.'
+    elif (( $(jq '.value | length' <<<"$graph_assignments") > provider_cap )); then
+        ca_finding CA-AZ-GRAPH-APP-ROLES Azure unknown high 'Graph app-role collection exceeds evidence bound' "More than $provider_cap Graph app-role assignments were returned."
+    elif jq -e --argjson risky "$(ca_baseline_get '.Azure.HighRiskGraphAppRoles')" --argjson assignments "$(jq '.value' <<<"$graph_assignments")" '[.value[0].appRoles[] | . as $role | select($risky | index($role.value) != null) | .id] as $risk_ids | [$assignments[] | . as $assignment | select($risk_ids | index($assignment.appRoleId) != null)] | length == 0' >/dev/null <<<"$graph_sp"; then
+        ca_finding CA-AZ-GRAPH-APP-ROLES Azure pass info 'High-risk Graph app roles unassigned' 'No collected service principal assignment grants an app role listed as high-risk by the baseline.'
+    else
+        ca_finding CA-AZ-GRAPH-APP-ROLES Azure fail critical 'High-risk Graph app role assigned' 'One or more service principals hold a Microsoft Graph application role listed as high-risk by the baseline.'
+    fi
+}
+
 ca_check_azure() {
     if ! ca_command_exists az; then ca_finding CA-AZ-001 Azure unknown medium 'Azure CLI unavailable' 'Install Azure CLI to run Azure checks.'; return; fi
     if [[ "$CLAUDIT_CONFIRM_CONNECTION" -ne 1 ]]; then ca_finding CA-AZ-002 Azure unknown info 'Azure connection not confirmed' 'Use --confirm-tenant-connection to permit read-only Azure API calls.'; return; fi
     local args=(); [[ -n "$CLAUDIT_AZURE_SUBSCRIPTION" ]] && args+=(--subscription "$CLAUDIT_AZURE_SUBSCRIPTION")
-    local identity role_assignments storage_accounts key_vaults subscription required_categories covered_categories missing_categories provider_cap
+    local identity role_assignments storage_accounts key_vaults subscription required_categories covered_categories missing_categories provider_cap graph_sp graph_assignments graph_sp_id graph_status
     provider_cap="$(ca_baseline_get '.Inventory.MaxAssetsPerProvider')"
     if ! identity="$(ca_run_cli az account show "${args[@]}" --output json 2>/dev/null)"; then ca_finding CA-AZ-002 Azure unknown high 'Azure subscription unavailable' 'Azure CLI could not read the selected subscription within the command deadline.'; return
     elif jq -e '(.id | type == "string" and length > 0) and (.tenantId | type == "string" and length > 0)' >/dev/null 2>&1 <<<"$identity"; then
@@ -182,6 +228,8 @@ ca_check_azure() {
     elif jq -e --argjson roles "$(ca_baseline_get '.Azure.HighRiskAzureRoles')" --argjson allowed "$(ca_baseline_get '.Azure.AllowedPrivilegedPrincipalIds')" '[.[] | . as $assignment | select(($roles | index($assignment.roleDefinitionName)) and ($allowed | index($assignment.principalId) | not))] | length == 0' >/dev/null <<<"$role_assignments"; then ca_finding CA-AZ-ROLE Azure pass info 'Azure privileged roles constrained' 'No collected high-risk Azure role assignment is outside the configured principal allow-list.'
     else ca_finding CA-AZ-ROLE Azure fail high 'Unapproved Azure privileged role assignment' 'One or more collected high-risk Azure role assignments are outside the configured principal allow-list.'; fi
 
+    ca_check_azure_graph_roles "$provider_cap"
+
     if ! storage_accounts="$(ca_run_cli az storage account list "${args[@]}" --output json 2>/dev/null)"; then ca_finding CA-AZ-STORAGE-NETWORK Azure unknown high 'Azure storage collection unavailable' 'Azure could not return storage accounts within the command deadline; network defaults remain unassessed.'
     elif ! jq -e 'type == "array" and all(.[]; (.networkRuleSet.defaultAction | type == "string"))' >/dev/null 2>&1 <<<"$storage_accounts"; then ca_finding CA-AZ-STORAGE-NETWORK Azure error high 'Azure storage response malformed' 'A returned storage account lacks a network default-action value.'
     elif (( $(jq length <<<"$storage_accounts") > provider_cap )); then ca_finding CA-AZ-STORAGE-NETWORK Azure unknown high 'Azure storage collection exceeds evidence bound' "More than $provider_cap storage accounts were returned; narrow scope before evaluation."
@@ -208,6 +256,10 @@ ca_check_gcp() {
         jq -cn --arg project "$(jq -r .projectId <<<"$project")" --arg number "$(jq -r .projectNumber <<<"$project")" '{project:$project,project_number:$number}' > "$CLAUDIT_OUTPUT_DIRECTORY/claudit-gcp-identity.json"
         ca_finding CA-GCP-002 GCP pass info 'GCP project verified' 'gcloud returned the selected project identity; see claudit-gcp-identity.json.'
     else ca_finding CA-GCP-002 GCP error high 'GCP project response malformed' 'gcloud returned no usable selected project identity.'; fi
+    if [[ -z "$(ca_baseline_get '.GCP.Organization' | tr -d '"')" ]]; then ca_finding CA-GCP-ORG GCP info info 'GCP organization binding not required' 'The local baseline does not require the project to belong to a specific organization.'
+    elif jq -e --arg organization "$(ca_baseline_get '.GCP.Organization' | tr -d '"')" '.parent.type == "organization" and (.parent.id | tostring) == $organization' >/dev/null 2>&1 <<<"$project"; then ca_finding CA-GCP-ORG GCP pass info 'GCP organization binding verified' 'The selected project reports the organization required by the baseline.'
+    elif jq -e '.parent.type == "organization" and (.parent.id | type == "string" or type == "number")' >/dev/null 2>&1 <<<"$project"; then ca_finding CA-GCP-ORG GCP fail high 'GCP organization binding differs' 'The selected project belongs to a different organization than the baseline requires.'
+    else ca_finding CA-GCP-ORG GCP unknown high 'GCP organization binding unavailable' 'The selected project response does not contain a usable organization parent.'; fi
     if ! response="$(ca_run_cli gcloud logging sinks list --project "$CLAUDIT_GCP_PROJECT" --limit "$provider_limit" --format=json 2>/dev/null)"; then ca_finding CA-GCP-LOGGING GCP unknown medium 'Logging sink collection unavailable' 'GCP did not return a successful collection within the command deadline.'
     elif ! jq -e 'type == "array" and all(.[]; (.name | type == "string") and (.destination | type == "string") and ((.disabled? // false) | type == "boolean"))' >/dev/null 2>&1 <<<"$response"; then ca_finding CA-GCP-LOGGING GCP error medium 'Logging response malformed' 'A returned logging sink lacks a valid name, destination or disabled state.'
     elif (( $(jq length <<<"$response") > provider_cap )); then ca_finding CA-GCP-LOGGING GCP unknown high 'Logging sink collection exceeds evidence bound' "More than $provider_cap logging sinks were returned; narrow scope before evaluation."
@@ -254,8 +306,52 @@ ca_check_gcp() {
     fi
 }
 
+ca_tailscale_get() {
+    curl --fail --silent --show-error --max-time 20 \
+        -H "Authorization: Bearer $CLAUDIT_TAILSCALE_TOKEN" -H 'Accept: application/json' \
+        "https://api.tailscale.com/api/v2/tailnet/$CLAUDIT_TAILSCALE_TAILNET$1"
+}
+
 ca_check_tailscale() {
     if [[ "$CLAUDIT_CONFIRM_CONNECTION" -ne 1 ]]; then ca_finding CA-TS-001 Tailscale unknown info 'Tailscale connection not confirmed' 'Use --confirm-tenant-connection to permit read-only API calls.'; return; fi
+    [[ "$CLAUDIT_TAILSCALE_TAILNET" == '-' || "$CLAUDIT_TAILSCALE_TAILNET" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || { ca_finding CA-TS-001 Tailscale error high 'Invalid Tailscale tailnet scope' 'Use the exact tailnet DNS name or the API current-tailnet alias.'; return; }
     if [[ -z "${CLAUDIT_TAILSCALE_TOKEN:-}" ]]; then ca_finding CA-TS-001 Tailscale unknown medium 'Tailscale token unavailable' 'Set CLAUDIT_TAILSCALE_TOKEN outside the repository.'; return; fi
-    if curl --fail --silent --show-error --max-time 15 -H "Authorization: Bearer $CLAUDIT_TAILSCALE_TOKEN" "https://api.tailscale.com/api/v2/tailnet/$CLAUDIT_TAILSCALE_TAILNET/devices" | jq -e . >/dev/null; then ca_finding CA-TS-001 Tailscale pass info 'Tailscale API reachable' 'The authorized tailnet device inventory was read successfully.'; else ca_finding CA-TS-001 Tailscale unknown high 'Tailscale API unavailable' 'The tailnet inventory could not be retrieved.'; fi
+    local devices keys acl provider_cap now_epoch max_stale stale_count max_expiry bad_expiry reusable preauthorized
+    provider_cap="$(ca_baseline_get '.Inventory.MaxAssetsPerProvider')"; now_epoch="$(date -u +%s)"
+    if ! devices="$(ca_tailscale_get '/devices' 2>/dev/null)"; then
+        ca_finding CA-TS-001 Tailscale unknown high 'Tailscale API unavailable' 'The tailnet device inventory could not be retrieved.'
+        ca_finding CA-TS-DEVICES Tailscale unknown high 'Tailscale device posture unavailable' 'Device last-seen evidence could not be collected.'
+    elif ! jq -e '(.devices | type == "array") and all(.devices[]; (.id | type == "string") and (.lastSeen | type == "string"))' >/dev/null 2>&1 <<<"$devices"; then
+        ca_finding CA-TS-001 Tailscale error high 'Tailscale device response malformed' 'The tailnet device response lacks a valid device collection.'
+        ca_finding CA-TS-DEVICES Tailscale error high 'Tailscale device posture malformed' 'One or more devices lack stable identity or last-seen evidence.'
+    elif (( $(jq '.devices | length' <<<"$devices") > provider_cap )); then
+        ca_finding CA-TS-001 Tailscale unknown high 'Tailscale device collection exceeds bound' "More than $provider_cap devices were returned; narrow the tailnet scope."
+        ca_finding CA-TS-DEVICES Tailscale unknown high 'Tailscale device posture incomplete' 'The bounded device collection is incomplete.'
+    else
+        ca_finding CA-TS-001 Tailscale pass info 'Tailscale API and tailnet verified' 'The authorized tailnet returned a complete bounded device inventory.'
+        max_stale="$(ca_baseline_get '.Tailscale.MaxStaleDeviceDays')"
+        if ! stale_count="$(jq -r --argjson now "$now_epoch" --argjson maximum "$max_stale" '[.devices[].lastSeen | (try fromdateiso8601 catch null) | select(. == null or . > $now or (($now - .) / 86400 | floor) > $maximum)] | length' <<<"$devices")"; then ca_finding CA-TS-DEVICES Tailscale error high 'Tailscale device timestamps malformed' 'One or more device last-seen timestamps cannot be evaluated.'
+        elif [[ "$stale_count" == 0 ]]; then ca_finding CA-TS-DEVICES Tailscale pass info 'Tailscale devices recently active' "No collected device exceeds the $max_stale-day stale threshold."
+        else ca_finding CA-TS-DEVICES Tailscale fail medium 'Stale Tailscale devices found' "$stale_count collected device(s) exceed the $max_stale-day stale threshold or have unusable timestamps."; fi
+    fi
+
+    if ! keys="$(ca_tailscale_get '/keys' 2>/dev/null)"; then ca_finding CA-TS-KEYS Tailscale unknown high 'Tailscale auth-key posture unavailable' 'Auth-key metadata could not be collected with the supplied read-only credential.'
+    elif ! jq -e '(.keys | type == "array") and all(.keys[]; (.id | type == "string") and (.created | type == "string") and (.expires | type == "string") and ((.capabilities.devices.create? // null) | type == "object" or type == "null"))' >/dev/null 2>&1 <<<"$keys"; then ca_finding CA-TS-KEYS Tailscale error high 'Tailscale key response malformed' 'The returned key inventory lacks required lifecycle or capability fields.'
+    elif (( $(jq '.keys | length' <<<"$keys") > provider_cap )); then ca_finding CA-TS-KEYS Tailscale unknown high 'Tailscale key collection exceeds bound' "More than $provider_cap keys were returned; auth-key posture remains incomplete."
+    else
+        max_expiry="$(ca_baseline_get '.Tailscale.MaxAuthKeyExpiryDays')"
+        bad_expiry="$(jq --argjson maximum "$max_expiry" '[.keys[] | select(.capabilities.devices.create? != null) | ((try (.created | fromdateiso8601) catch null) as $created | (try (.expires | fromdateiso8601) catch null) as $expires | select($created == null or $expires == null or $expires < $created or (($expires - $created) / 86400 | ceil) > $maximum))] | length' <<<"$keys")"
+        reusable="$(jq '[.keys[] | select(.capabilities.devices.create? != null and (.capabilities.devices.create.reusable? // false) == true)] | length' <<<"$keys")"
+        preauthorized="$(jq '[.keys[] | select(.capabilities.devices.create? != null and (.capabilities.devices.create.preauthorized? // false) == true)] | length' <<<"$keys")"
+        if (( bad_expiry > 0 )); then ca_finding CA-TS-KEYS Tailscale fail high 'Long-lived Tailscale auth keys found' "$bad_expiry auth key(s) exceed the configured $max_expiry-day lifetime or have invalid timestamps."
+        elif ca_baseline_enabled '.Tailscale.DisallowReusableAuthKeys' && (( reusable > 0 )); then ca_finding CA-TS-KEYS Tailscale fail high 'Reusable Tailscale auth keys found' "$reusable reusable auth key(s) violate the baseline."
+        elif ca_baseline_enabled '.Tailscale.DisallowPreauthorizedAuthKeys' && (( preauthorized > 0 )); then ca_finding CA-TS-KEYS Tailscale fail high 'Preauthorized Tailscale auth keys found' "$preauthorized preauthorized auth key(s) violate the baseline."
+        else ca_finding CA-TS-KEYS Tailscale pass info 'Tailscale auth keys within baseline' 'Collected auth-key lifetimes and reusable/preauthorized capabilities satisfy the baseline.'; fi
+    fi
+
+    if ! acl="$(ca_tailscale_get '/acl' 2>/dev/null)"; then ca_finding CA-TS-ACL Tailscale unknown high 'Tailscale ACL unavailable' 'The tailnet policy file could not be collected with the supplied credential.'
+    elif ! jq -e 'type == "object" and ((.acls? // []) | type == "array") and ((.grants? // []) | type == "array")' >/dev/null 2>&1 <<<"$acl"; then ca_finding CA-TS-ACL Tailscale error high 'Tailscale ACL response malformed' 'The returned tailnet policy is not a supported JSON ACL document.'
+    elif ! ca_baseline_enabled '.Tailscale.DisallowAllowAllAcl'; then ca_finding CA-TS-ACL Tailscale info info 'Tailscale allow-all policy permitted' 'The local baseline permits an allow-all tailnet policy.'
+    elif jq -e 'any((.acls // [])[]; (.action? // "accept") == "accept" and ((.src // []) | index("*") != null) and ((.dst // []) | index("*:*") != null)) or any((.grants // [])[]; ((.src // []) | index("*") != null) and ((.dst // []) | index("*") != null) and ((.ip // []) | index("*") != null))' >/dev/null <<<"$acl"; then ca_finding CA-TS-ACL Tailscale fail critical 'Tailscale allow-all policy found' 'The tailnet policy contains a universal source-to-destination allow rule.'
+    else ca_finding CA-TS-ACL Tailscale pass info 'Tailscale ACL is not allow-all' 'No supported universal allow-all ACL or grant was returned.'; fi
 }

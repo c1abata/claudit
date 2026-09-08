@@ -5,7 +5,7 @@ args="$*"; state="${CLAUDIT_GCP_FIXTURE:-healthy}"
 if [[ "$args" == *"asset search-all-resources"* ]]; then
     printf '%s\n' '[{"name":"//fixture/resource/one"}]'
 elif [[ "$args" == *"projects describe"* ]]; then
-    case "$state" in healthy|insecure) printf '%s\n' '{"projectId":"fixture","projectNumber":"123456789012"}' ;; malformed) printf '%s\n' '{}' ;; denied) exit 1 ;; *) exit 64 ;; esac
+    case "$state" in healthy|insecure) printf '%s\n' '{"projectId":"fixture","projectNumber":"123456789012","parent":{"type":"organization","id":"654321"}}' ;; malformed) printf '%s\n' '{}' ;; denied) exit 1 ;; *) exit 64 ;; esac
 elif [[ "$args" == *"logging sinks list"* ]]; then
     case "$state" in healthy) printf '%s\n' '[{"name":"central","destination":"storage.googleapis.com/audit-logs","disabled":false}]' ;; insecure) printf '%s\n' '[{"name":"_Default","destination":"logging.googleapis.com/projects/fixture/locations/global/buckets/_Default","disabled":false}]' ;; malformed) printf '%s\n' '{}' ;; denied) exit 1 ;; *) exit 64 ;; esac
 elif [[ "$args" == *"projects get-iam-policy"* ]]; then

@@ -10,8 +10,9 @@ and a concrete remediation, and unavailable evidence remains `unknown` or
 `error` rather than becoming a successful result. The report exposes coverage
 and copies the exact catalog used for the run alongside its artifacts.
 `config/baseline-capabilities.json` separately states which baseline settings
-are enforced, used only to constrain scope, or not yet implemented. Unsupported
-settings are visible policy context and never count as passing checks.
+are enforced or used only to constrain scope. Every shipped assessment setting
+has an executable control; scope-only entries define authorized targets and
+cannot count as passing checks.
 
 AWS Passive assessment binds the selected CLI identity to a private run artifact
 and evaluates root MFA, the IAM password policy, active IAM user access-key age,
@@ -22,7 +23,8 @@ a ten-page bound; an incomplete sequence remains unassessed.
 
 Azure Passive assessment binds a selected subscription and tenant to a private
 run artifact. It evaluates high-risk role assignments against approved principal
-object IDs, storage network default action, Key Vault purge protection, and
+object IDs, high-risk Microsoft Graph application-role grants, storage network
+default action, Key Vault purge protection, and
 enabled Activity Log alerts. Alert coverage must match every category in
 `Azure.RequiredActivityLogCategories`, target the selected subscription, and
 deliver to a configured action group.
@@ -31,7 +33,8 @@ Denied or malformed Azure responses remain unassessed or invalid evidence.
 GCP Passive assessment binds the selected project identity to a private run
 artifact. It evaluates primitive IAM-role membership, required allServices audit
 log types, OS Login metadata and an enabled user-managed logging sink with an
-explicit destination. It also checks enabled user-managed service-account key
+explicit destination. It can bind the project to an expected organization and
+also checks enabled user-managed service-account key
 age without retaining service-account email or key identity. Destination
 retention remains a separate infrastructure review.
 
@@ -65,8 +68,10 @@ sensitivity. Use resolver text representation (for example `10 mail.example.com.
 for MX and quoted TXT data); an empty value list means expected absence. Records
 are confined to the session domain. Read-only JSON exports from Route 53, Azure
 DNS, Google Cloud DNS and Cloudflare can populate these RRsets after local scope
-validation. TTL, propagation across resolvers, provider-neutral zone export and
-provider-side DNS writes are not implemented. Passive DNS uses
+validation. Claudit evaluates declared TTL limits, compares desired records
+through configured verification resolvers, performs bounded configured-subdomain
+discovery, and can use `dnsx` when enabled. The workspace exports a reviewable
+BIND-style zone file. Passive DNS uses
 only the explicit `Domain.Resolver` HTTPS endpoint from the baseline; it has no
 fallback resolver. The shipped baseline names Cloudflare public DoH, so DNS
 names leave the host by default. For private zones, provide an authorized custom
@@ -174,7 +179,9 @@ The URL is never written to a report or configuration file.
 The Bash implementation uses Microsoft Graph REST with a token supplied by
 `CLAUDIT_GRAPH_TOKEN`, or an existing Azure CLI session. It currently verifies
 organization access, Entra authorization/Conditional Access, SharePoint tenant
-settings and OneDrive API access. Exchange controls use the isolated
+settings and OneDrive API access. Entra checks cover Security Defaults,
+administrator MFA, legacy-auth blocking, Global Administrator count,
+guest invitations, application registration and user consent. Exchange controls use the isolated
 `backends/exchange.ps1` adapter because Exchange Online exposes those controls
 through its supported PowerShell module. It runs only for `Exchange`/`M365`,
 only after connection confirmation, and returns normalized JSON Lines to Bash.

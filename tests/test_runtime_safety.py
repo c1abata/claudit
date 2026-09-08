@@ -79,6 +79,31 @@ class RuntimeSafetyTests(unittest.TestCase):
             'private': True, 'timeout_seconds': 7, 'transport': 'dns-over-https', 'fallback': 'disabled',
         } for item in evidence))
 
+    def test_dns_ttl_propagation_and_bounded_dnsx_are_evaluated(self):
+        baseline = json.loads((ROOT / 'config/baseline.json').read_text())
+        baseline['Domain']['ExpectedRecords'] = [{'name': 'example.com', 'type': 'A', 'values': ['203.0.113.10']}]
+        baseline['Domain']['VerificationResolvers'] = [{
+            'Name': 'Secondary DoH', 'Endpoint': 'https://secondary.example/dns-query',
+            'Private': False, 'TimeoutSeconds': 5,
+        }]
+        baseline['Domain']['Subdomains'] = ['www']
+        baseline['Domain']['EnableDnsx'] = True
+        self.fixture['example.com|A']['Answer'][0]['TTL'] = 300
+        self.fixture['www.example.com|A'] = {'Status': 0, 'Answer': [{'name': 'www.example.com.', 'type': 1, 'TTL': 300, 'data': '203.0.113.11'}]}
+        binary_dir = self.root / 'dnsx-bin'; binary_dir.mkdir()
+        binary = binary_dir / 'dnsx'
+        binary.write_text('#!/bin/sh\nprintf \'%s\\n\' \'{"host":"www.example.com","a":["203.0.113.11"]}\'\n')
+        binary.chmod(0o755)
+        self.environment['PATH'] = str(binary_dir) + ':' + os.environ['PATH']
+        doc = self.run_audit('passive', '--service', 'Domain', '--domain', 'example.com', fixture=self.fixture, baseline=baseline)
+        statuses = {finding['id']: finding['status'] for finding in doc['findings']}
+        self.assertEqual(statuses['CA-DNS-SUBDOMAINS'], 'pass')
+        self.assertEqual(statuses['CA-DNS-DNSX'], 'pass')
+        self.assertEqual(statuses['CA-DNS-TTL'], 'pass')
+        self.assertEqual(statuses['CA-DNS-PROPAGATION'], 'pass')
+        propagation = [json.loads(line) for line in (self.last_output / 'claudit-dns-propagation.jsonl').read_text().splitlines()]
+        self.assertEqual(propagation[0]['resolver'], 'Secondary DoH')
+
     def test_resolver_endpoint_rejects_credentials_or_query_fallback(self):
         baseline = json.loads((ROOT / 'config/baseline.json').read_text())
         baseline['Domain']['Resolver']['Endpoint'] = 'https://token@example.com/dns-query?fallback=https://public.example'
@@ -171,6 +196,95 @@ if ca_graph_get_all token /loop >/dev/null; then exit 82; else [[ $? == 3 ]]; fi
 """)
         result = subprocess.run(['bash', str(script), str(ROOT)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_entra_baseline_controls_use_complete_graph_evidence(self):
+        script = self.root / 'entra.sh'
+        script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+CLAUDIT_ROOT=$1
+source "$CLAUDIT_ROOT/lib/core.sh"
+export CLAUDIT_GRAPH_TOKEN=fixture
+ca_graph_get() {
+    case "$2" in
+      /organization*) printf '%s\\n' '{"value":[{"id":"tenant"}]}' ;;
+      /policies/authorizationPolicy) printf '%s\\n' '{"allowedToSignUpEmailBasedSubscriptions":false,"allowInvitesFrom":"adminsAndGuestInviters","defaultUserRolePermissions":{"allowedToCreateApps":false},"permissionGrantPolicyIdsAssignedToDefaultUserRole":[]}' ;;
+      /policies/identitySecurityDefaultsEnforcementPolicy) printf '%s\\n' '{"isEnabled":false}' ;;
+      /identity/conditionalAccess/policies*) printf '%s\\n' '{"value":[{"id":"mfa","state":"enabled","conditions":{"users":{"includeRoles":["62e90394-69f5-4237-9190-012177145e10"]},"clientAppTypes":["browser"]},"grantControls":{"builtInControls":["mfa"]}},{"id":"legacy","state":"enabled","conditions":{"users":{"includeUsers":["All"]},"clientAppTypes":["exchangeActiveSync","other"]},"grantControls":{"builtInControls":["block"]}}]}' ;;
+      /roleManagement/directory/roleDefinitions*) printf '%s\\n' '{"value":[{"id":"global-admin","displayName":"Global Administrator"}]}' ;;
+      /roleManagement/directory/roleAssignments*) printf '%s\\n' '{"value":[{"id":"one","principalId":"principal","roleDefinitionId":"global-admin"}]}' ;;
+      *) return 1 ;;
+    esac
+}
+main passive --service Entra --confirm-tenant-connection --output-directory "$2" --format json
+""")
+        out = self.root / 'entra-output'
+        result = subprocess.run(['bash', str(script), str(ROOT), str(out)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = json.loads((out / 'claudit-report.json').read_text())
+        expected = {'CA-ENTRA-001', 'CA-ENTRA-CA', 'CA-ENTRA-MFA-ADMINS', 'CA-ENTRA-LEGACY',
+                    'CA-ENTRA-GLOBAL-ADMINS', 'CA-ENTRA-INVITES', 'CA-ENTRA-APP-REG', 'CA-ENTRA-CONSENT'}
+        statuses = {finding['id']: finding['status'] for finding in doc['findings'] if finding['id'] in expected}
+        self.assertEqual(statuses, {control: 'pass' for control in expected})
+
+    def test_tailscale_posture_controls_are_fail_closed_and_bounded(self):
+        script = self.root / 'tailscale.sh'
+        script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+CLAUDIT_ROOT=$1
+source "$CLAUDIT_ROOT/lib/core.sh"
+export CLAUDIT_TAILSCALE_TOKEN=fixture
+ca_tailscale_get() {
+    case "$1" in
+      /devices) printf '%s\\n' '{"devices":[{"id":"device","lastSeen":"2026-09-01T00:00:00Z"}]}' ;;
+      /keys) printf '%s\\n' '{"keys":[{"id":"key","created":"2026-09-01T00:00:00Z","expires":"2026-09-15T00:00:00Z","capabilities":{"devices":{"create":{"reusable":false,"preauthorized":false}}}}]}' ;;
+      /acl) printf '%s\\n' '{"acls":[{"action":"accept","src":["group:admins"],"dst":["tag:server:443"]}],"grants":[]}' ;;
+      *) return 1 ;;
+    esac
+}
+main passive --service Tailscale --tailscale-tailnet fixture.example --confirm-tenant-connection --output-directory "$2" --format json
+""")
+        out = self.root / 'tailscale-output'
+        result = subprocess.run(['bash', str(script), str(ROOT), str(out)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = json.loads((out / 'claudit-report.json').read_text())
+        expected = {'CA-TS-001', 'CA-TS-DEVICES', 'CA-TS-KEYS', 'CA-TS-ACL'}
+        statuses = {finding['id']: finding['status'] for finding in doc['findings'] if finding['id'] in expected}
+        self.assertEqual(statuses, {control: 'pass' for control in expected})
+
+    def test_vps_posture_uses_fixed_read_only_evidence_contract(self):
+        script = self.root / 'vps.sh'
+        script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+CLAUDIT_ROOT=$1
+source "$CLAUDIT_ROOT/lib/core.sh"
+ca_run_cli() { return 0; }
+ca_vps_collect() { printf 'ports\\t22,80,443\\npending\\t2\\nfirewall\\ttrue\\nauthlog\\ttrue\\npasswordauth\\tno\\nrootlogin\\tno\\n'; }
+main passive --service VPS --vps-target audit@example.com --confirm-tenant-connection --output-directory "$2" --format json
+""")
+        out = self.root / 'vps-output'
+        result = subprocess.run(['bash', str(script), str(ROOT), str(out)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = json.loads((out / 'claudit-report.json').read_text())
+        expected = {'CA-VPS-002', 'CA-VPS-PORTS', 'CA-VPS-UPDATES', 'CA-VPS-FIREWALL',
+                    'CA-VPS-AUTHLOG', 'CA-VPS-SSH-PASSWORD', 'CA-VPS-SSH-ROOT'}
+        statuses = {finding['id']: finding['status'] for finding in doc['findings'] if finding['id'] in expected}
+        self.assertEqual(statuses, {control: 'pass' for control in expected})
+
+    def test_vps_unapproved_public_listener_fails(self):
+        script = self.root / 'vps-public-port.sh'
+        script.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+CLAUDIT_ROOT=$1
+source "$CLAUDIT_ROOT/lib/core.sh"
+ca_run_cli() { return 0; }
+ca_vps_collect() { printf 'ports\\t22,8080\\npending\\t0\\nfirewall\\ttrue\\nauthlog\\ttrue\\npasswordauth\\tno\\nrootlogin\\tno\\n'; }
+main passive --service VPS --vps-target audit@example.com --confirm-tenant-connection --output-directory "$2" --format json
+""")
+        out = self.root / 'vps-public-port-output'
+        result = subprocess.run(['bash', str(script), str(ROOT), str(out)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = json.loads((out / 'claudit-report.json').read_text())
+        self.assertEqual(next(f['status'] for f in doc['findings'] if f['id'] == 'CA-VPS-PORTS'), 'fail')
 
 
 if __name__ == '__main__': unittest.main()

@@ -83,13 +83,17 @@
         "Subdomains": ["www", "autodiscover", "mail", "vpn", "portal", "admin", "dev", "staging"],
         "RequireDnssec": false,
         "DkimSelectors": ["default", "google", "selector1", "selector2", "k1", "s1", "s2", "mail"],
-        "Resolver": {
+      "Resolver": {
             "Name": "Cloudflare public DNS-over-HTTPS",
             "Endpoint": "https://cloudflare-dns.com/dns-query",
             "Private": false,
-            "TimeoutSeconds": 10
-        },
-        "ExpectedRecords": [],
+        "TimeoutSeconds": 10
+      },
+      "VerificationResolvers": [],
+      "MinTtlSeconds": 60,
+      "MaxTtlSeconds": 86400,
+      "DefaultTtlSeconds": 300,
+      "ExpectedRecords": [],
         "EnableDnsx": false,
         "DnsxBinary": "dnsx",
         "DnsxRateLimit": 100,

@@ -444,6 +444,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if parsed.path == '/api/sessions': return self._call(self.cockpit.workspace.index)
         if parsed.path == '/api/session': return self._call(lambda: self.cockpit.workspace.load(parse_qs(parsed.query).get('id', [''])[0]))
         if parsed.path == '/api/session/export': return self._call(lambda: self.cockpit.workspace.export(parse_qs(parsed.query).get('id', [''])[0]))
+        if parsed.path == '/api/session/dns/export': return self._call(lambda: self.cockpit.workspace.dns_zone_export(parse_qs(parsed.query).get('id', [''])[0]))
         if parsed.path == '/api/session/plan': return self._call(lambda: self.cockpit.workspace.plan(parse_qs(parsed.query).get('id', [''])[0]))
         if parsed.path == "/api/reports":
             query = parse_qs(parsed.query)

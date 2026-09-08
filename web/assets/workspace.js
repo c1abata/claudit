@@ -80,6 +80,12 @@
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
     link.download = `claudit-session-${selected}.json`; link.click(); URL.revokeObjectURL(link.href);
   });
+  bind("sessionDnsExport", async () => {
+    if (!selected) throw new Error("Select a domain work session first.");
+    const data = await request(`/api/session/dns/export?id=${encodeURIComponent(selected)}`);
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([data.content], {type: data.mediaType}));
+    link.download = data.filename; link.click(); URL.revokeObjectURL(link.href);
+  });
   bind("sessionArchive", async () => {
     if (!selected) throw new Error("Select an active work session first.");
     await request("/api/session/archive", {id: selected}); await index();

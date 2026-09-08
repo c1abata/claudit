@@ -3,7 +3,13 @@
 set -euo pipefail
 args="$*"
 state="${CLAUDIT_AZURE_FIXTURE:-healthy}"
-if [[ "$args" == *"account show"* ]]; then
+if [[ "$args" == *"rest --method get"* ]]; then
+    if [[ "$args" == *"appRoleAssignedTo"* ]]; then
+        case "$state" in healthy|oversized) printf '%s\n' '{"value":[]}' ;; insecure) printf '%s\n' '{"value":[{"id":"assignment","principalId":"application","appRoleId":"dangerous-role"}]}' ;; malformed) printf '%s\n' '{"value":"bad"}' ;; denied) exit 1 ;; *) exit 64 ;; esac
+    else
+        case "$state" in healthy|insecure|oversized) printf '%s\n' '{"value":[{"id":"graph-service-principal","appRoles":[{"id":"dangerous-role","value":"Directory.ReadWrite.All"},{"id":"safe-role","value":"User.Read.All"}]}]}' ;; malformed) printf '%s\n' '{"value":[{}]}' ;; denied) exit 1 ;; *) exit 64 ;; esac
+    fi
+elif [[ "$args" == *"account show"* ]]; then
     case "$state" in
         healthy|insecure|oversized) printf '%s\n' '{"id":"00000000-0000-0000-0000-000000000001","tenantId":"00000000-0000-0000-0000-000000000002"}' ;;
         malformed) printf '%s\n' '{"unexpected":true}' ;;

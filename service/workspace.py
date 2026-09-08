@@ -98,7 +98,7 @@ class Workspace:
             if (name, kind) in seen:
                 raise ValueError('Duplicate DNS RRset; combine its values.')
             seen.add((name, kind))
-            if not isinstance(values, list) or len(values) > 30 or any(not isinstance(v, str) or not 1 <= len(v) <= 2048 or '\n' in v for v in values):
+            if not isinstance(values, list) or len(values) > 30 or any(not isinstance(v, str) or not 1 <= len(v) <= 2048 or '\n' in v or '\r' in v for v in values):
                 raise ValueError('DNS values must be a list of at most 30 single-line strings; an empty list means expected absence.')
             record.update(name=name, type=kind, values=sorted(set(values)))
         expectations = request.get('expectedStatuses', {})
@@ -130,6 +130,26 @@ class Workspace:
     def export(self, session_id: str) -> dict:
         return self.load(session_id)
 
+    def dns_zone_export(self, session_id: str) -> dict:
+        session = self.load(session_id)
+        domain = session['scope'].get('domain', '').lower().rstrip('.')
+        if not domain:
+            raise ValueError('The session has no authorized domain scope.')
+        records = session['baseline']['Domain'].get('ExpectedRecords', [])
+        ttl = session['baseline']['Domain']['DefaultTtlSeconds']
+        lines = ['; Claudit review export: verify provider syntax before import.', f'$ORIGIN {domain}.', f'$TTL {ttl}']
+        for record in sorted(records, key=lambda item: (item['name'], item['type'])):
+            name = record['name'].lower().rstrip('.')
+            owner = '@' if name == domain else name[:-(len(domain) + 1)]
+            if not record['values']:
+                lines.append(f'; EXPECT ABSENT: {owner} {record["type"]}')
+                continue
+            for value in record['values']:
+                lines.append(f'{owner} {ttl} IN {record["type"]} {value}')
+        content = '\n'.join(lines) + '\n'
+        return {'filename': f'{domain}.zone', 'mediaType': 'text/dns', 'content': content,
+                'recordSets': len(records), 'readOnly': True}
+
     def plan(self, session_id: str) -> dict:
         session = self.load(session_id)
         services = set(session['scope'].get('service', []))
@@ -159,7 +179,7 @@ class Workspace:
             'Review failed, warning, unknown and error findings with their cited remediation.',
             'Apply approved changes outside Claudit, record the decision, then reassess the same scope.',
         ], 'controls': controls, 'capabilities': capabilities, 'suggestedQuestions': questions,
-                'limitations': ['Active adds only declared HTTPS and SSH reachability probes.', 'Unsupported baseline entries remain descriptive and never pass.', 'DNS changes are review plans; Claudit does not mutate provider zones.']}
+                'limitations': ['Active adds only declared HTTPS and SSH reachability probes.', 'Every shipped baseline entry is executable or an explicit scope boundary.', 'DNS changes are review plans; Claudit does not mutate provider zones.']}
 
     def normalize_dns_import(self, request: dict) -> dict:
         provider, domain, payload = request.get('provider'), str(request.get('domain', '')).lower().rstrip('.'), request.get('data')

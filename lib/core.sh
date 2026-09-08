@@ -22,6 +22,7 @@ CLAUDIT_COMPARE_DIFFERENCE=""
 CLAUDIT_WEBHOOK_URL="${CLAUDIT_WEBHOOK_URL:-}"
 CLAUDIT_WEBHOOK_TYPE="teams"
 CLAUDIT_EXCHANGE_ORGANIZATION="${CLAUDIT_EXCHANGE_ORGANIZATION:-}"
+CLAUDIT_M365_TENANT_ID=""
 CLAUDIT_EXCHANGE_TENANT_ID="${CLAUDIT_EXCHANGE_TENANT_ID:-}"
 CLAUDIT_EXCHANGE_CLIENT_ID="${CLAUDIT_EXCHANGE_CLIENT_ID:-}"
 CLAUDIT_EXCHANGE_CERTIFICATE_THUMBPRINT="${CLAUDIT_EXCHANGE_CERTIFICATE_THUMBPRINT:-}"
@@ -123,7 +124,52 @@ EOF
       ($resolver.Private | type == "boolean") and
       ($resolver.TimeoutSeconds | type == "number" and floor == . and . >= 1 and . <= 30)
     ' "$path" >/dev/null || ca_die 'invalid Domain.Resolver; use an explicit HTTPS endpoint, 1–30 second timeout and no credentials, query or fragment'
-    jq -e '[.VPS.AllowedPublicPorts[] | type == "number" and . >= 1 and . <= 65535] | all' "$path" >/dev/null || ca_die "baseline '$path' has invalid VPS.AllowedPublicPorts"
+    jq -e '
+      (.Domain.VerificationResolvers | type == "array" and length <= 2 and all(.[];
+        type == "object" and
+        (.Name | type == "string" and length >= 1 and length <= 120) and
+        (.Endpoint | type == "string" and test("^https://[^/?#@]+(/[^?#]*)?$")) and
+        (.Private | type == "boolean") and
+        (.TimeoutSeconds | type == "number" and floor == . and . >= 1 and . <= 30))) and
+      (.Domain.MinTtlSeconds | type == "number" and floor == . and . >= 0 and . <= 604800) and
+      (.Domain.MaxTtlSeconds | type == "number" and floor == . and . >= 0 and . <= 604800) and
+      (.Domain.MaxTtlSeconds >= .Domain.MinTtlSeconds) and
+      (.Domain.DefaultTtlSeconds | type == "number" and floor == . and . >= 0 and . <= 604800) and
+      (.Domain.DefaultTtlSeconds >= .Domain.MinTtlSeconds and .Domain.DefaultTtlSeconds <= .Domain.MaxTtlSeconds)
+    ' "$path" >/dev/null || ca_die 'invalid Domain verification resolvers or TTL bounds'
+    jq -e '
+      (.Entra.RequireSecurityDefaultsOrConditionalAccess | type == "boolean") and
+      (.Entra.RequireMfaForAdmins | type == "boolean") and
+      (.Entra.BlockLegacyAuthentication | type == "boolean") and
+      (.Entra.MaxGlobalAdministrators | type == "number" and floor == . and . >= 1 and . <= 100) and
+      (.Entra.AllowedInviteFrom | type == "array" and length >= 1 and length <= 4 and all(.[]; . as $invite | ["none","adminsAndGuestInviters","adminsGuestInvitersAndAllMembers","everyone"] | index($invite) != null)) and
+      (.Entra.AllowUsersToRegisterApplications | type == "boolean") and
+      (.Entra.AllowUsersToConsentForApps | type == "boolean")
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid Entra control values"
+    jq -e '
+      (.Tailscale.Tailnet | type == "string" and length <= 253) and
+      (.Tailscale.MaxStaleDeviceDays | type == "number" and floor == . and . >= 1 and . <= 3650) and
+      (.Tailscale.MaxAuthKeyExpiryDays | type == "number" and floor == . and . >= 1 and . <= 90) and
+      (.Tailscale.DisallowReusableAuthKeys | type == "boolean") and
+      (.Tailscale.DisallowPreauthorizedAuthKeys | type == "boolean") and
+      (.Tailscale.DisallowAllowAllAcl | type == "boolean")
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid Tailscale control values"
+    jq -e '
+      (.Domain.Subdomains | type == "array" and length <= 100 and all(.[]; type == "string" and test("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$") and length <= 63)) and
+      (.Domain.EnableDnsx | type == "boolean") and
+      (.Domain.DnsxBinary | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")) and
+      (.Domain.DnsxRateLimit | type == "number" and floor == . and . >= 1 and . <= 1000) and
+      (.Domain.DnsxResolvers | type == "array" and length <= 20 and all(.[]; type == "string" and length >= 1 and length <= 256 and (test("[[:space:],]") | not))) and
+      (.Domain.DnsxTimeoutSeconds | type == "number" and floor == . and . >= 1 and . <= 300)
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid bounded Domain discovery values"
+    jq -e '
+      (.VPS.AllowedPublicPorts | type == "array" and length <= 100 and all(.[]; type == "number" and floor == . and . >= 1 and . <= 65535)) and
+      (.VPS.MaxPendingUpdates | type == "number" and floor == . and . >= 0 and . <= 100000) and
+      (.VPS.RequireFirewall | type == "boolean") and
+      (.VPS.RequireAuthLog | type == "boolean") and
+      (.VPS.RequireSshPasswordAuthenticationDisabled | type == "boolean") and
+      (.VPS.RequireSshRootLoginDisabled | type == "boolean")
+    ' "$path" >/dev/null || ca_die "baseline '$path' has invalid VPS control values"
     jq -e '
       (.AWS.RequireRootMfa | type == "boolean") and
       (.AWS.RequireMultiRegionCloudTrail | type == "boolean") and
@@ -139,6 +185,7 @@ EOF
       all(.[]; type == "string" and length >= 1 and length <= 80)
     ' "$path" >/dev/null || ca_die "baseline '$path' has invalid Azure.RequiredActivityLogCategories"
     jq -e '.GCP.MaxServiceAccountKeyAgeDays | type == "number" and floor == . and . >= 1 and . <= 3650' "$path" >/dev/null || ca_die "baseline '$path' has invalid GCP.MaxServiceAccountKeyAgeDays"
+    jq -e '.GCP.Organization | type == "string" and (length == 0 or test("^[0-9]{1,30}$"))' "$path" >/dev/null || ca_die "baseline '$path' has invalid GCP.Organization"
     jq -e '.Inventory.MaxAssetsPerProvider | type == "number" and floor == . and . >= 1 and . <= 10000' "$path" >/dev/null || ca_die "baseline '$path' has invalid Inventory.MaxAssetsPerProvider"
 }
 
@@ -153,7 +200,7 @@ ca_finding_scope_key() {
         Azure) printf 'azure:%s' "$CLAUDIT_AZURE_SUBSCRIPTION" ;;
         GCP) printf 'gcp:%s' "$CLAUDIT_GCP_PROJECT" ;;
         Tailscale) printf 'tailscale:%s' "$CLAUDIT_TAILSCALE_TAILNET" ;;
-        M365|Entra|SharePoint|OneDrive|Exchange) printf 'm365:%s' "$CLAUDIT_EXCHANGE_ORGANIZATION" ;;
+        M365|Entra|SharePoint|OneDrive|Exchange) printf 'm365:%s' "${CLAUDIT_M365_TENANT_ID:-$CLAUDIT_EXCHANGE_ORGANIZATION}" ;;
         Inventory) printf 'inventory:%s:%s:%s:%s' "$CLAUDIT_AWS_PROFILE" "$CLAUDIT_AZURE_SUBSCRIPTION" "$CLAUDIT_GCP_PROJECT" "$CLAUDIT_AWS_REGIONS" ;;
         *) printf 'service:%s' "$1" ;;
     esac
@@ -196,8 +243,8 @@ ca_status_from_command() {
 ca_write_reports() {
     local json="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.json" csv="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.csv"
     local md="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.md" html="$CLAUDIT_OUTPUT_DIRECTORY/claudit-report.html"
-    jq -s --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg version "$CLAUDIT_VERSION" --arg catalog "$(jq -r .Version "$CLAUDIT_CONTROL_CATALOG")" --arg level "$CLAUDIT_LEVEL" --arg services "$CLAUDIT_SERVICE" --arg domain "$CLAUDIT_DOMAIN" --arg vps "$CLAUDIT_VPS_TARGET" --arg aws "$CLAUDIT_AWS_PROFILE" --arg regions "$CLAUDIT_AWS_REGIONS" --arg azure "$CLAUDIT_AZURE_SUBSCRIPTION" --arg gcp "$CLAUDIT_GCP_PROJECT" \
-        '. as $findings | ($findings | length) as $total | {schema:"claudit/bash-report-v2",version:$version,catalog_version:$catalog,scope:{level:$level,services:$services,domain:$domain,vps:$vps,aws_profile:$aws,aws_regions:$regions,azure_subscription:$azure,gcp_project:$gcp},generated_at:$generated,findings:$findings,summary:{total:$total,failed:([$findings[]|select(.status=="fail")]|length),warnings:([$findings[]|select(.status=="warning")]|length),not_assessed:([$findings[]|select(.status=="unknown" or .status=="error")]|length),coverage:(if $total == 0 then 0 else (([$findings[]|select(.status!="unknown" and .status!="error")]|length) / $total * 100) end)}}' "$CLAUDIT_FINDINGS_FILE" > "$json"
+    jq -s --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg version "$CLAUDIT_VERSION" --arg catalog "$(jq -r .Version "$CLAUDIT_CONTROL_CATALOG")" --arg level "$CLAUDIT_LEVEL" --arg services "$CLAUDIT_SERVICE" --arg domain "$CLAUDIT_DOMAIN" --arg vps "$CLAUDIT_VPS_TARGET" --arg aws "$CLAUDIT_AWS_PROFILE" --arg regions "$CLAUDIT_AWS_REGIONS" --arg azure "$CLAUDIT_AZURE_SUBSCRIPTION" --arg gcp "$CLAUDIT_GCP_PROJECT" --arg m365 "$CLAUDIT_M365_TENANT_ID" --arg tailnet "$CLAUDIT_TAILSCALE_TAILNET" \
+        '. as $findings | ($findings | length) as $total | {schema:"claudit/bash-report-v2",version:$version,catalog_version:$catalog,scope:{level:$level,services:$services,domain:$domain,vps:$vps,aws_profile:$aws,aws_regions:$regions,azure_subscription:$azure,gcp_project:$gcp,m365_tenant:$m365,tailscale_tailnet:$tailnet},generated_at:$generated,findings:$findings,summary:{total:$total,failed:([$findings[]|select(.status=="fail")]|length),warnings:([$findings[]|select(.status=="warning")]|length),not_assessed:([$findings[]|select(.status=="unknown" or .status=="error")]|length),coverage:(if $total == 0 then 0 else (([$findings[]|select(.status!="unknown" and .status!="error")]|length) / $total * 100) end)}}' "$CLAUDIT_FINDINGS_FILE" > "$json"
     case "$CLAUDIT_FORMAT" in
         json) ;;
         csv|all) jq -r '(["id","service","status","severity","title","detail","control_level","observed_at"], (.findings[] | [.id,.service,.status,.severity,.title,.detail,.control_level,.observed_at])) | @csv' "$json" > "$csv" ;;&

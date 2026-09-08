@@ -17,8 +17,9 @@ git diff --check
 ```
 
 The symbolic suite covers catalog binding, secure/weak/unavailable business DNS
-data, CloudTrail empty/denied/malformed outcomes, Exchange normalization and
-report drift. It is not a substitute for a read-only acceptance run with the
+data, DNS TTL and propagation, CloudTrail empty/denied/malformed outcomes,
+Azure Graph grants, GCP organization binding, Tailscale and VPS posture,
+Exchange normalization and report drift. It is not a substitute for a read-only acceptance run with the
 least-privilege identities of the target environment.
 
 ## Installation
@@ -64,9 +65,16 @@ custom Host headers are rejected. A reverse proxy must set the upstream Host
 to the backend IP. Do not expose the standard-library server directly to the
 public Internet.
 
-Existing network-bound installations will refuse to start until this password
-is configured. This source review did not update `/opt/claudit`, change the
-installed service, or alter firewall policy.
+Existing network-bound installations refuse to start until this password is
+configured. Upgrades preserve the protected service environment and merge new
+baseline defaults without overwriting operator values.
+
+Microsoft Graph assessment needs read access to organization, authorization
+policy, Security Defaults, Conditional Access, directory roles and application
+role assignments. Tailscale assessment uses a read-only API credential for the
+declared tailnet. VPS posture uses the existing trusted SSH host key and reads
+listeners, update metadata, firewall state, authentication logs and effective
+OpenSSH settings. Missing permissions remain incomplete evidence.
 
 ## Read-only target acceptance
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ca_send_notification() {
-    local report="$1" payload summary failed unknown coverage text
+    local report="$1" payload failed unknown coverage text
     [[ -n "$CLAUDIT_WEBHOOK_URL" ]] || return 0
     [[ "$CLAUDIT_WEBHOOK_URL" =~ ^https:// ]] || ca_die 'webhook URL must use HTTPS'
     [[ "$CLAUDIT_WEBHOOK_TYPE" == slack || "$CLAUDIT_WEBHOOK_TYPE" == teams ]] || ca_die 'webhook type must be slack or teams'

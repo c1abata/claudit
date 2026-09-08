@@ -32,6 +32,13 @@ class WorkspaceTests(unittest.TestCase):
             self.cockpit.operation_log('../../outside')
         with self.assertRaises(ValueError):
             self.workspace.load('../outside')
+        session = self.create(dnsRecords=[{'name': 'www.example.com', 'type': 'A', 'values': ['192.0.2.10']},
+                                          {'name': 'old.example.com', 'type': 'AAAA', 'values': []}])
+        zone = self.workspace.dns_zone_export(session['id'])
+        self.assertEqual(zone['filename'], 'example.com.zone')
+        self.assertIn('$ORIGIN example.com.', zone['content'])
+        self.assertIn('www 300 IN A 192.0.2.10', zone['content'])
+        self.assertIn('; EXPECT ABSENT: old AAAA', zone['content'])
 
     def test_incomplete_never_passes(self):
         p = Path(self.tmp.name) / 'claudit-report.json'

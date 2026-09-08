@@ -1,6 +1,6 @@
 # Claudit architecture review and Codex handoff
 
-Date: 2026-09-08 · Source branch: `main` · Runtime: 0.5.0 · Catalog: 2026.09.1
+Date: 2026-09-08 · Source branch: `main` · Runtime: 0.5.0 · Catalog: 2026.09.2
 
 ## Executive assessment
 
@@ -12,16 +12,14 @@ cockpit and plain JSON files. No new runtime packages, agents or hosted language
 model were introduced.
 
 This review corrected consequential execution and evidence-integrity defects.
-It does **not** establish comprehensive cloud posture coverage. Existing AWS,
-Azure, GCP, Tailscale and VPS collectors assess a small set of properties;
-several policy fields inherited from the older implementation remain descriptive
-rather than executable. Treat this as a private operator tool with explicit
-coverage, not a compliance certification engine.
+Every assessment field in the shipped baseline is now executable; target and
+authorization fields remain explicit scope boundaries. Treat the resulting
+coverage as a private operator assessment contract, not a compliance
+certification for every possible cloud service.
 
-The checkout already contained uncommitted dashboard, DNS, installer and report
-changes before this review. Those were preserved and integrated. The installed
-service and firewall were not changed, and no live cloud assessment or remote DNS
-write was performed. Generated acceptance evidence uses local fixtures.
+No remote cloud or DNS mutation is part of the product. Provider collection is
+read-only and active probes are bounded to declared targets. Deterministic
+fixtures cover secure, insecure, unavailable and malformed evidence paths.
 
 ## Architecture reviewed
 
@@ -32,12 +30,12 @@ write was performed. Generated acceptance evidence uses local fixtures.
 | `checks/domain.sh` | Public DNS and one HTTPS HEAD | Validate DNS response status/type; retain observations; compare declared RRsets; require authenticated data for a DNSSEC pass. |
 | `checks/providers.sh`, `checks/inventory.sh` | Read-only provider checks and inventory | Preserve provider CLIs; distinguish malformed/unavailable data. One AWS region per run avoids silently ignoring requested regions. |
 | `checks/m365.sh`, `checks/exchange.sh`, Exchange adapter | Graph and Exchange evidence | Scope emitted Graph findings to selected services; missing settings stay unknown. Exchange remains an optional isolated PowerShell dependency. |
-| `checks/vps.sh` | Declared host validation, port 22 and SSH | Remove target interpolation into shell code; require existing trusted host keys. Current implementation is connectivity, not host hardening coverage. |
+| `checks/vps.sh` | Declared host validation and read-only posture | Require existing trusted host keys; assess exposed listeners, updates, firewall, authentication logging and effective SSH policy. |
 | `lib/drift.sh` | Compare reports | A failure followed by unavailable evidence is not fixed. Reports with declared differing scopes are rejected. |
 | `lib/interchange.sh`, `lib/notify.sh`, schemas | Portable projections and optional notifications | Canonical Claudit JSON remains authoritative. OCSF 1.8 events and OSCAL 1.2.3 output pass the official structural validators; this does not certify assessment content. Dashboard children do not inherit webhook delivery configuration. |
 | `service/dashboard.py` | HTTP/API, execution, artifacts | Native HTML, authentication, request validation, bounded runner and confined artifact access. |
 | `service/workspace.py` | Sessions, known configuration, guidance | New file-backed session model with fixed scope/baseline, evidence citations and persistent notes/questions. |
-| `web/` | Operator workflow | Sessions and descriptive queries added; legacy unsupported form inputs removed from the visible workflow. |
+| `web/` | Operator workflow | Sessions, descriptive queries, DNS plans and provider-neutral zone export are available in one minimal workflow. |
 | Installer/systemd | Single-host deployment | Retain existing installation model; document password requirement before upgrading a network-bound instance. |
 | `legacy/powershell/` | Historical implementation | Retained as reference; no longer parsed at runtime to generate cockpit HTML. Not audited as a supported application. |
 
@@ -111,9 +109,8 @@ flowchart LR
 
 13. **Baseline support is now explicit and fail-closed.**
     `config/baseline-capabilities.json` maps every shipped baseline key to
-    `enforced`, `scope_only`, or `unsupported`. Enforced entries name their
-    runtime controls; unsupported policy context is displayed to the operator
-    but cannot become a passing assessment. Startup, CLI execution and tests
+    `enforced` or `scope_only`. Enforced entries name their runtime controls;
+    scope-only entries define the authorized assessment boundary. Startup, CLI execution and tests
     reject a malformed or incomplete map. Every report retains the exact map
     used for the run as `claudit-baseline-capabilities.json`.
 
@@ -211,6 +208,34 @@ flowchart LR
     existing operator value onto current defaults. A regression proves both
     value preservation and addition of the required resolver configuration.
 
+26. **Entra policy settings are executable.** Security Defaults, administrator
+    MFA, legacy authentication blocking, Global Administrator count, guest
+    invitations, application registration and user consent are evaluated from
+    bounded Microsoft Graph evidence. Tenant identity contributes to finding
+    scope, and missing Graph permissions remain unknown.
+
+27. **Tailscale and VPS posture are assessed read-only.** Tailscale device age,
+    key lifetime/reuse and universal allow rules are checked within the declared
+    tailnet. VPS collection sends a fixed script over an existing trusted SSH
+    connection and evaluates public listeners, pending updates, firewall state,
+    authentication logging and effective password/root login settings.
+
+28. **Cloud hierarchy and application grants are bound to policy.** GCP projects
+    can be required to belong to one organization. Azure resolves Microsoft
+    Graph application roles and evaluates assigned high-risk roles against the
+    configured allow-list using bounded Graph continuations.
+
+29. **DNS assessment covers discovery, TTL and propagation.** Configured
+    subdomain labels are queried with strict count bounds; optional `dnsx`
+    discovery has fixed wordlists, resolver lists, rate and process deadlines.
+    Desired RRsets are checked against declared TTL limits and up to two
+    verification resolvers so propagation or split-view differences cannot pass.
+
+30. **The workspace exports a provider-neutral zone draft.** Desired session
+    records can be downloaded as a BIND-style zone file for review. Provider
+    exports, change plans, current-value preconditions, rollback values and
+    verification queries remain the safe operator handoff.
+
 ## New work-session contract
 
 - `DataRoot/sessions/<id>.json`, schema `claudit/session-v1`.
@@ -252,9 +277,11 @@ query. Collection failure yields `observed: null` and an instruction to collect
 evidence before proposing a change. No DNS record is automatically created,
 deleted or replaced.
 
-This is configuration planning and assessment. Direct provider DNS writes,
-provider-neutral zone-file export, TTL policy, split-horizon DNS, resolver diversity,
-propagation tracking and rollback execution need separate implementations.
+This is configuration planning and assessment. Claudit checks TTL policy,
+resolver diversity and propagation, and exports a provider-neutral BIND-style
+zone draft. Direct provider writes and automated rollback execution remain
+outside the read-only audit boundary; the change plan supplies preconditions,
+rollback values and verification steps for controlled operator execution.
 Passive DNS uses the explicit `Domain.Resolver` DoH endpoint. The shipped
 baseline selects Cloudflare public DoH and therefore is unsuitable for private
 zones. An operator can provide an authorized custom baseline selecting a trusted
@@ -276,8 +303,8 @@ Its format is provider-specific; keep response fixtures tied to this collector.
   request tokens reject mutations, disallowed Host headers reject requests.
 - Browser reload after restarting the test server preserves the session.
 - Browser capability-map acceptance: the work session shows the state and
-  rationale for each selected-service baseline key, including unsupported keys
-  with no executable control.
+  rationale for every selected-service baseline key; the shipped map contains
+  67 enforced entries, 7 scope-only entries and no unsupported entries.
 - Resolver acceptance: an operator-declared private DoH endpoint is retained in
   every fixture observation, while resolver URLs containing credentials or a
   query string are rejected before collection.
@@ -296,15 +323,15 @@ Its format is provider-specific; keep response fixtures tied to this collector.
 | P1 | Provider-wide pagination and evidence semantics. | **Complete.** Explicit AWS/Graph continuations, provider CLI pagination, activity-category evaluation, deadlines, resource caps and incomplete-state fixtures are in place. |
 | P2 | Resource identity and drift model. | **Complete.** Stable IDs bind to a one-way scope identity without exposing the raw scope. |
 | P2 | Collector deadlines and collection caps. | **Complete.** Provider, Graph, Exchange and VPS commands are time-bounded; excessive or partial evidence cannot pass. |
-| P2 | DNS provider adapters and safe changes. | **Complete for the non-mutating product boundary.** Four provider export adapters and review plans with preconditions, rollback data and verification are implemented. |
+| P2 | DNS provider adapters and safe changes. | **Complete for the read-only product boundary.** Four provider export adapters, bounded discovery, TTL/propagation checks, BIND export and review plans with preconditions, rollback data and verification are implemented. |
+| P2 | Shipped baseline execution coverage. | **Complete.** All 67 assessment entries bind to executable controls; 7 target and authorization entries are scope-only; none are unsupported. |
 | P2 | Session lifecycle and storage scale. | **Complete.** Export, archive, archive-only deletion, quarantine, bounded histories and paginated report indexing are tested. |
 | P2 | Guided workflows. | **Complete.** Plans and questions are service-specific and derive from the real executable catalog and capability boundaries. |
 | P3 | Multi-user identity and roles. | **Excluded by product decision.** Claudit remains a private, single-user tool on one trusted host. |
 
 Do not add a database, framework, background agent fleet or hosted AI dependency
-until the single-host file model has a measured limitation. Do not enable
-unsupported baseline controls by claiming their presence is evidence of an
-implemented assessment.
+until the single-host file model has a measured limitation. New baseline policy
+fields must ship with a catalog-bound executable control and fail-closed tests.
 
 ## Deployment handoff
 
@@ -336,7 +363,7 @@ archived and deleted.
   `tests/fixtures/bin/az`, `tests/fixtures/bin/gcloud`, `tests/run.sh`.
 - Regression evidence: `tests/test_runtime_safety.py`, `tests/test_workspace.py`.
 
-Current automated acceptance: **30 Python tests passed**, followed by all Bash
+Current automated acceptance: **35 Python tests passed**, followed by all Bash
 fixture checks and installer dry-run. The local browser acceptance confirmed
 that the guided plan renders executable controls and limitations, Formal runs
 complete, and archived sessions are read-only before operation launch. Browser
