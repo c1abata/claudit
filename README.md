@@ -87,12 +87,13 @@ retention/deletion can remove evidence; session history is retained separately,
 including previous answers. The workspace bounds history and run references,
 paginates report indexes, and can quarantine an unreadable session file.
 
-The dashboard defaults to loopback. Any non-loopback bind requires
-`CLAUDIT_DASHBOARD_PASSWORD` (at least 24 characters), with username `claudit`.
-Use an SSH tunnel or a TLS reverse proxy for remote access; Basic authentication
-does not encrypt HTTP. An existing network installation must set the password
-before upgrading. The per-page request token is a CSRF control, not a login.
-The cockpit permits two simultaneous runs, each with a 600-second limit.
+The dashboard has no initial web login by default, including on an explicitly
+configured LAN bind. The per-page request token still protects state-changing
+requests. To restore HTTP Basic authentication, set `RequireAuthentication` to
+`true` in `/etc/claudit/service.json` and provide
+`CLAUDIT_DASHBOARD_PASSWORD` (at least 24 characters) in the protected service
+environment; the username is `claudit`. The cockpit permits two simultaneous
+runs, each with a 600-second limit.
 
 See [the architecture review and Codex handoff](docs/CODEX_ARCHITECTURE_REPORT.md)
 for implemented corrections, evidence and the explicit provider coverage.

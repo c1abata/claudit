@@ -11,6 +11,7 @@ node --check "$root/web/assets/workspace.js"
 test -x "$root/service/claudit-service.sh"
 test ! -x "$root/service/claudit.service"
 grep -Fqx 'ExecStart=/opt/claudit/service/claudit-service.sh' "$root/service/claudit.service"
+jq -e '.RequireAuthentication == false' "$root/service/service.json" >/dev/null
 "$root/install-ubuntu.sh" --dry-run >/dev/null
 merged_baseline="$tmp/merged-baseline.json"
 jq -s '.[0] * .[1]' \

@@ -159,5 +159,20 @@ class WorkspaceTests(unittest.TestCase):
         connection.request('GET', '/', headers={**auth, 'Host': 'attacker.example'}); response = connection.getresponse(); response.read()
         self.assertEqual(response.status, 403)
 
+    def test_http_has_no_initial_authentication_when_disabled(self):
+        self.cockpit.access_token = ''
+        handler = functools.partial(dashboard.DashboardHandler, cockpit=self.cockpit)
+        server = dashboard.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        connection = http.client.HTTPConnection('127.0.0.1', server.server_port)
+        self.addCleanup(connection.close)
+        connection.request('GET', '/api/state')
+        response = connection.getresponse(); response.read()
+        self.assertEqual(response.status, 200)
+        connection.request('POST', '/api/sessions', '{}')
+        response = connection.getresponse(); response.read()
+        self.assertEqual(response.status, 403)
+
 
 if __name__ == '__main__': unittest.main()

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Make initial dashboard authentication explicitly configurable and disabled by
+  default for the private single-user LAN deployment, while retaining the
+  per-page mutation token and optional HTTP Basic mode.
+
 ## 0.4.0 - 2026-09-05
 
 - Complete the Linux-first Bash runtime migration and retain PowerShell only as

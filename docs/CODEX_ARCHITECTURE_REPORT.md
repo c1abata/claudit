@@ -1,6 +1,6 @@
 # Claudit architecture review and Codex handoff
 
-Date: 2026-09-08 · Source branch: `main` · Runtime: 0.5.0 · Catalog: 2026.09.2
+Date: 2026-09-09 · Source branch: `main` · Runtime: 0.5.0 · Catalog: 2026.09.2
 
 ## Executive assessment
 
@@ -33,10 +33,10 @@ fixtures cover secure, insecure, unavailable and malformed evidence paths.
 | `checks/vps.sh` | Declared host validation and read-only posture | Require existing trusted host keys; assess exposed listeners, updates, firewall, authentication logging and effective SSH policy. |
 | `lib/drift.sh` | Compare reports | A failure followed by unavailable evidence is not fixed. Reports with declared differing scopes are rejected. |
 | `lib/interchange.sh`, `lib/notify.sh`, schemas | Portable projections and optional notifications | Canonical Claudit JSON remains authoritative. OCSF 1.8 events and OSCAL 1.2.3 output pass the official structural validators; this does not certify assessment content. Dashboard children do not inherit webhook delivery configuration. |
-| `service/dashboard.py` | HTTP/API, execution, artifacts | Native HTML, authentication, request validation, bounded runner and confined artifact access. |
+| `service/dashboard.py` | HTTP/API, execution, artifacts | Native HTML, optional authentication, request validation, bounded runner and confined artifact access. |
 | `service/workspace.py` | Sessions, known configuration, guidance | New file-backed session model with fixed scope/baseline, evidence citations and persistent notes/questions. |
 | `web/` | Operator workflow | Sessions, descriptive queries, DNS plans and provider-neutral zone export are available in one minimal workflow. |
-| Installer/systemd | Single-host deployment | Retain existing installation model; document password requirement before upgrading a network-bound instance. |
+| Installer/systemd | Single-host deployment | Retain the existing installation model and explicit operator-controlled authentication mode. |
 | `legacy/powershell/` | Historical implementation | Retained as reference; no longer parsed at runtime to generate cockpit HTML. Not audited as a supported application. |
 
 ```mermaid
@@ -63,11 +63,12 @@ flowchart LR
    Formal run previously allowed provider reads. Formal now clears connection
    authorization; VPS returns after scope validation. Tests replace every
    provider/network executable and verify zero invocations.
-3. **Private network access enforced.** A non-loopback bind requires a password
-   of at least 24 characters. When configured, every route requires HTTP Basic
-   authentication, including reads. The HTML request token remains a separate
-   mutation guard. Host validation, no-store responses, content security policy
-   and sandboxed HTML reports reduce browser-origin exposure.
+3. **Web access mode is explicit.** The single-user LAN installation can run
+   without an initial login through `RequireAuthentication: false`, while the
+   HTML request token remains the mutation guard. Optional HTTP Basic mode still
+   protects every route when enabled with a password of at least 24 characters.
+   Host validation, no-store responses, content security policy and sandboxed
+   HTML reports reduce browser-origin exposure.
 4. **Explicit operation authorization.** The dashboard no longer supplies
    read-only connection authorization silently. Session and direct launch paths
    require the supplied confirmation; Active needs its additional confirmation.
@@ -335,13 +336,13 @@ fields must ship with a catalog-bound executable control and fail-closed tests.
 
 ## Deployment handoff
 
-The delivery is intended for one trusted operator. A non-loopback installation
-still requires `CLAUDIT_DASHBOARD_PASSWORD` in the protected service environment
-and fails closed without it. Provider credentials and firewall rules are not
-created or broadened by the installer. On 8 September 2026 the source was
-installed to `/opt/claudit`, the preserved legacy baseline was migrated, and
-`claudit.service` was restarted successfully on its existing bind. Anonymous
-HTTP returned 401, authenticated state retrieval returned 200, and a live
+The delivery is intended for one trusted operator. The current private-LAN
+installation has its initial web authentication disabled by explicit service
+configuration; optional Basic authentication remains available. Provider
+credentials and firewall rules are not created or broadened by the installer.
+On 9 September 2026 the source was installed to `/opt/claudit`, the preserved
+legacy baseline was migrated, and `claudit.service` was restarted successfully
+on its existing bind. HTTP state retrieval returned 200 without an initial login, and a live
 Formal session operation completed `Succeeded`; its temporary session was then
 archived and deleted.
 
@@ -363,7 +364,7 @@ archived and deleted.
   `tests/fixtures/bin/az`, `tests/fixtures/bin/gcloud`, `tests/run.sh`.
 - Regression evidence: `tests/test_runtime_safety.py`, `tests/test_workspace.py`.
 
-Current automated acceptance: **35 Python tests passed**, followed by all Bash
+Current automated acceptance: **37 Python tests passed**, followed by all Bash
 fixture checks and installer dry-run. The local browser acceptance confirmed
 that the guided plan renders executable controls and limitations, Formal runs
 complete, and archived sessions are read-only before operation launch. Browser

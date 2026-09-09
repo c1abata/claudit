@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,6 +16,21 @@ SPEC.loader.exec_module(dashboard)
 
 
 class DashboardReportTests(unittest.TestCase):
+    def test_dashboard_authentication_mode_is_explicit_and_disabled_by_default(self) -> None:
+        password = "a-private-password-of-sufficient-length"
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
+            "CLAUDIT_DASHBOARD_PASSWORD": password,
+        }):
+            os.environ.pop("CLAUDIT_DASHBOARD_AUTHENTICATION", None)
+            cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
+            self.assertEqual(cockpit.access_token, "")
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {
+            "CLAUDIT_DASHBOARD_AUTHENTICATION": "required",
+            "CLAUDIT_DASHBOARD_PASSWORD": password,
+        }):
+            cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
+            self.assertEqual(cockpit.access_token, password)
+
     def test_dashboard_loads_capability_map(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")

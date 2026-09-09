@@ -81,7 +81,10 @@ class Cockpit:
         self.state_path = self.data_root / "dashboard-state.json"
         self.token = secrets.token_hex(32)
         self.lock = threading.RLock()
-        self.access_token = os.environ.get('CLAUDIT_DASHBOARD_PASSWORD', '')
+        authentication = os.environ.get('CLAUDIT_DASHBOARD_AUTHENTICATION', 'disabled')
+        if authentication not in {'disabled', 'required'}:
+            raise RuntimeError('Dashboard authentication mode must be disabled or required.')
+        self.access_token = os.environ.get('CLAUDIT_DASHBOARD_PASSWORD', '') if authentication == 'required' else ''
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.baseline_capabilities = self.load_baseline_capabilities()
         self.dns_resolver = self.load_dns_resolver()
@@ -532,9 +535,12 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, required=True); parser.add_argument("--web-root", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
+    authentication = os.environ.get('CLAUDIT_DASHBOARD_AUTHENTICATION', 'disabled')
     password = os.environ.get('CLAUDIT_DASHBOARD_PASSWORD', '')
-    if args.bind not in ('127.0.0.1', '::1', 'localhost') and len(password) < 24:
-        parser.error('Network binding requires CLAUDIT_DASHBOARD_PASSWORD with at least 24 characters. Use a loopback SSH tunnel for encrypted remote access.')
+    if authentication not in {'disabled', 'required'}:
+        parser.error('CLAUDIT_DASHBOARD_AUTHENTICATION must be disabled or required.')
+    if authentication == 'required' and len(password) < 24:
+        parser.error('Required dashboard authentication needs CLAUDIT_DASHBOARD_PASSWORD with at least 24 characters.')
     cockpit = Cockpit(Path(__file__).resolve().parent.parent, args.data_root, args.web_root)
     handler = lambda *items, **kwargs: DashboardHandler(*items, cockpit=cockpit, **kwargs)
     class Server(ThreadingHTTPServer):

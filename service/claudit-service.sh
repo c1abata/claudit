@@ -7,6 +7,7 @@ command -v jq >/dev/null 2>&1 || { echo 'claudit: jq is required' >&2; exit 69; 
 bind="$(jq -r '.BindAddress // "127.0.0.1"' "$config")"
 port="$(jq -r '.Port // 8765' "$config")"
 data_root="$(jq -r '.DataRoot // "/var/lib/claudit"' "$config")"
+require_authentication="$(jq -r '.RequireAuthentication // false' "$config")"
 case "$bind" in
   127.0.0.1|::1|0.0.0.0) ;;
   *) echo 'claudit: dashboard bind address must be 127.0.0.1, ::1, or 0.0.0.0' >&2; exit 64 ;;
@@ -15,6 +16,11 @@ if ! [[ "$port" =~ ^[0-9]{2,5}$ ]] || (( port > 65535 )); then
   echo 'claudit: invalid dashboard port' >&2
   exit 64
 fi
+case "$require_authentication" in
+  true) export CLAUDIT_DASHBOARD_AUTHENTICATION=required ;;
+  false) export CLAUDIT_DASHBOARD_AUTHENTICATION=disabled ;;
+  *) echo 'claudit: RequireAuthentication must be true or false' >&2; exit 64 ;;
+esac
 mkdir -p "$data_root/reports/dashboard"
 exec python3 "$(dirname "$0")/dashboard.py" \
   --bind "$bind" --port "$port" --data-root "$data_root" \

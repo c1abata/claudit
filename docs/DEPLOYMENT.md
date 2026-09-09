@@ -50,13 +50,16 @@ sudo systemctl status claudit --no-pager
 curl --fail http://127.0.0.1:8765/
 ```
 
-The dashboard is loopback-only by default. For an explicitly approved network
-deployment, set `BindAddress` to `0.0.0.0` in `/etc/claudit/service.json`, then
-set `CLAUDIT_DASHBOARD_PASSWORD` to a strong password of at least 24 characters
-in `/etc/claudit/claudit.env` before restarting. The login username is `claudit`.
-The process refuses a non-loopback bind without this configuration. Passwords
-are not embedded in HTML or passed to audit children. All routes require login
-when configured, including reports, assets, logs and session APIs.
+The dashboard is loopback-only by default. For the private LAN deployment, set
+`BindAddress` to `0.0.0.0` in `/etc/claudit/service.json`; the shipped
+`RequireAuthentication: false` opens the cockpit without an initial login. The
+per-page request token continues to protect state-changing requests.
+
+Authentication remains optional. Set `RequireAuthentication` to `true`, add a
+`CLAUDIT_DASHBOARD_PASSWORD` of at least 24 characters to
+`/etc/claudit/claudit.env`, and restart. The username is `claudit`; all routes
+then require login. Passwords are not embedded in HTML or passed to audit
+children.
 
 Prefer a loopback bind and an SSH tunnel. For LAN use, restrict the source
 subnet and terminate TLS at a controlled reverse proxy: Basic authentication
@@ -65,9 +68,8 @@ custom Host headers are rejected. A reverse proxy must set the upstream Host
 to the backend IP. Do not expose the standard-library server directly to the
 public Internet.
 
-Existing network-bound installations refuse to start until this password is
-configured. Upgrades preserve the protected service environment and merge new
-baseline defaults without overwriting operator values.
+Upgrades preserve the protected service environment and merge new baseline
+defaults without overwriting operator values.
 
 Microsoft Graph assessment needs read access to organization, authorization
 policy, Security Defaults, Conditional Access, directory roles and application
