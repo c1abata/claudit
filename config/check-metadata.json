@@ -16,10 +16,10 @@
       "Name": "scope-governance",
       "DefaultSeverity": "High",
       "Categories": ["scope", "governance"],
-      "Threats": ["unauthorized-targeting", "coverage-gap"],
-      "Description": "Constrains assessment targets to explicit, authorized scope.",
-      "Risk": "An implicit or malformed scope can test unauthorized assets or omit assets that the operator intended to assess.",
-      "Remediation": "Declare exact authorized targets, review the scope plan and rerun without wildcards or inferred assets."
+      "Threats": ["malformed-targeting", "coverage-gap"],
+      "Description": "Constrains assessment targets to explicit, syntactically valid asset scope.",
+      "Risk": "An implicit or malformed scope can test the wrong asset or omit assets that the operator intended to assess.",
+      "Remediation": "Declare exact targets, review the scope plan and rerun without wildcards or inferred assets."
     },
     {
       "Name": "identity-access",

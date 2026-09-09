@@ -2,6 +2,11 @@
 
 Date: 2026-09-09 · Source branch: `main` · Runtime: 0.5.0 · Catalog: 2026.09.2
 
+Current behavior update: `Domain.AuthorizedDomains` is deprecated and ignored.
+Every syntactically valid entered domain is accepted as an asset and consolidated
+under one persistent normalized history. Older authorization references below
+describe the earlier runtime reviewed by this document.
+
 ## Executive assessment
 
 Claudit now has a working private assessment workflow: create a scoped work

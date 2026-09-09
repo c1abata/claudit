@@ -78,8 +78,7 @@
         "DisallowAllowAllAcl": true
     },
     "Domain": {
-        "_comment": "Formal and passive DNS checks for pre-authorized domains only. dnsx is optional and disabled by default.",
-        "AuthorizedDomains": [],
+        "_comment": "Formal and passive DNS checks for declared domains. Every entered domain is accepted as an assessment asset. dnsx is optional and disabled by default.",
         "Subdomains": ["www", "autodiscover", "mail", "vpn", "portal", "admin", "dev", "staging"],
         "RequireDnssec": false,
         "DkimSelectors": ["default", "google", "selector1", "selector2", "k1", "s1", "s2", "mail"],

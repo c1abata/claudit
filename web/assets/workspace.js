@@ -70,7 +70,7 @@
     const file = el("sessionDnsFile").files[0];
     if (!file) throw new Error("Choose a provider JSON export first.");
     const scope = operationRequest();
-    if (!scope.domain) throw new Error("Declare the authorized root domain in New operation.");
+    if (!scope.domain) throw new Error("Declare the root domain in New operation.");
     const result = await request("/api/session/dns/import", {provider: el("sessionDnsProvider").value, domain: scope.domain, data: JSON.parse(await file.text())});
     el("sessionDns").value = result.records.flatMap(record => record.values.map(value => `${record.name} | ${record.type} | ${value}`)).join("\n");
   });

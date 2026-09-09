@@ -2,7 +2,7 @@
 
 const state = {
     services: [], authCatalog: [], controlCatalog: [], baselineCapabilities: [], dnsResolver: null,
-    reports: [], operations: [], overview: {}, reportTotal: 0, selectedOperation: "", selectedReport: "",
+    reports: [], operations: [], overview: {}, assetHistory: [], reportTotal: 0, selectedOperation: "", selectedReport: "",
     reportCache: new Map(), wizardStep: 1, serviceSignature: "", refreshPending: null, draftRequestId: "",
 };
 
@@ -97,10 +97,11 @@ function renderReview() {
 }
 function refreshWizard() {
     const profile = activeProfile(); const preflight = profile === "preflight"; const active = !preflight && qs("#controlLevel").value === "Active";
+    const publicDomainOnly = !preflight && selectedServices().length === 1 && hasService("Domain");
     qs("#advancedScope").hidden = preflight;
     qs("#serviceList").hidden = preflight;
-    qs("#confirmTenantConnection").closest("label").hidden = preflight;
-    qs("#authenticationDetails").hidden = preflight;
+    qs("#confirmTenantConnection").closest("label").hidden = preflight || publicDomainOnly;
+    qs("#authenticationDetails").hidden = preflight || publicDomainOnly;
     setGroup("domain", hasService("Domain")); setGroup("vps", hasService("VPS")); setGroup("aws", hasProvider("AWS")); setGroup("azure", hasProvider("Azure")); setGroup("gcp", hasProvider("GCP")); setGroup("tailscale", hasService("Tailscale")); setGroup("m365", hasProvider("Microsoft365")); setGroup("delegated", hasProvider("Microsoft365") && qs("#authMode").value !== "AppOnly"); setGroup("active", active);
     qs("#controlLevel").disabled = preflight;
     const controls = plannedControls(); qs("#controlCount").textContent = `${controls.length} controls planned`;
@@ -128,10 +129,10 @@ function validateStep(step) {
     const request = operationRequest();
     if (step === 2 && request.mode !== "preflight") {
         if (!request.service.length) throw new Error("Select at least one audit service.");
-        if (request.service.includes("Domain") && !request.domain) throw new Error("Enter the authorized root domain.");
+        if (request.service.includes("Domain") && !request.domain) throw new Error("Enter the root domain.");
         if (request.service.includes("VPS") && !request.vpsTarget) throw new Error("Enter the authorized VPS target.");
     }
-    if (step === 4 && request.mode !== "preflight" && ["Passive", "Active"].includes(request.controlLevel) && !request.confirmTenantConnection) throw new Error("Authorize the declared read-only DNS/provider connections.");
+    if (step === 4 && request.mode !== "preflight" && ["Passive", "Active"].includes(request.controlLevel) && !(request.service.length === 1 && request.service[0] === "Domain") && !request.confirmTenantConnection) throw new Error("Authorize the declared read-only provider connections.");
     if (step === 4 && request.controlLevel === "Active" && !request.confirmActiveProbes) throw new Error("Authorize the bounded active probes.");
 }
 function setWizardStep(next) {
@@ -139,7 +140,7 @@ function setWizardStep(next) {
     qsa(".wizard-step").forEach(node => { node.hidden = Number(node.dataset.step) !== state.wizardStep; });
     qsa("[data-step-indicator]").forEach(node => { node.toggleAttribute("aria-current", Number(node.dataset.stepIndicator) === state.wizardStep); node.classList.toggle("complete", Number(node.dataset.stepIndicator) < state.wizardStep); });
     qs("#wizardBack").hidden = state.wizardStep === 1; qs("#wizardNext").hidden = state.wizardStep === 5; qs("#startOp").hidden = state.wizardStep !== 5;
-    qs("#wizardTitle").textContent = ["Choose the assessment objective", "Declare the authorized scope", "Review available controls", "Confirm access and authorization", "Review the executable plan"][state.wizardStep - 1];
+    qs("#wizardTitle").textContent = ["Choose the assessment objective", "Declare the asset scope", "Review available controls", "Confirm required access", "Review the executable plan"][state.wizardStep - 1];
     qs("#wizardStatus").textContent = ""; renderReview(); qs(".wizard-content").scrollTop = 0;
 }
 function openWizard() { state.draftRequestId = `web-${crypto.randomUUID()}`; selectTab("operations"); qs("#operationWizard").hidden = false; qs("#newOperation").setAttribute("aria-expanded", "true"); setWizardStep(1); qs("#operationWizard").scrollIntoView({block: "start"}); }
@@ -171,10 +172,10 @@ function outcomeSummary(findings) {
 }
 async function renderOverview() {
     const report = assessmentReports()[0]; const empty = !report; qs("#overviewEmpty").hidden = !empty; qs("#overviewPanels").hidden = empty;
-    if (!report) { ["#mConfirmed", "#mWarnings", "#mCoverage", "#mGaps", "#mChanges"].forEach(selector => qs(selector).textContent = "—"); qs("#overviewContext").textContent = "No valid assessment is available for the selected scope."; return; }
+    if (!report) { const historical=state.assetHistory.find(item=>item.value===qs("#scopeFilter").value); ["#mConfirmed", "#mWarnings", "#mCoverage", "#mGaps", "#mChanges"].forEach(selector => qs(selector).textContent = "—"); qs("#overviewContext").textContent = historical ? `${historical.kind} · ${historical.value} · historical aggregate retained` : "No valid assessment is available for the selected asset."; qs("#overviewEmpty h3").textContent=historical?`Historical aggregate for ${historical.value}`:"No passive or active evidence in this asset"; qs("#overviewEmpty p").textContent=historical?`${historical.assessmentCount} assessments collected since ${localTime(historical.firstSeen)}. Latest coverage ${historical.latest.coverage}% and risk score ${historical.latest.riskScore}; original evidence is outside current report retention.`:"Prepare a bounded assessment in Operations. Formal validation checks scope and prerequisites but does not establish security posture."; return; }
     let documentData;
     try { documentData = await reportData(report); } catch (error) { qs("#overviewPanels").hidden = true; qs("#overviewEmpty").hidden = false; qs("#overviewEmpty h3").textContent = "Assessment evidence is unreadable"; qs("#overviewEmpty p").textContent = error.message; return; }
-    const findings = Array.isArray(documentData.findings) ? documentData.findings : []; const summary = outcomeSummary(findings); const scopeReports = assessmentReports(); const comparison = await compareReport(report.RelativePath, documentData).catch(() => ({comparable:false,changes:new Map()}));
+    const findings = Array.isArray(documentData.findings) ? documentData.findings : []; const summary = outcomeSummary(findings); const scopeReports = assessmentReports(); const asset = state.assetHistory.find(item => item.value === targetOf(report)); const comparison = await compareReport(report.RelativePath, documentData).catch(() => ({comparable:false,changes:new Map()}));
     qs("#mConfirmed").textContent = summary.confirmed; qs("#mWarnings").textContent = summary.warning; qs("#mCoverage").textContent = `${summary.coverage.toFixed(1)}%`; qs("#mGaps").textContent = summary.gaps; qs("#mChanges").textContent = comparison.comparable ? [...comparison.changes.values()].filter(value => !["Unchanged","EvidenceChanged"].includes(value)).length : "No baseline";
     qs("#overviewContext").textContent = `${report.Summary?.Assessment || "Assessment"} · ${targetOf(report)} · observed ${localTime(documentData.generated_at || report.LastWriteUtc)}`;
     const priority = {critical: 0, high: 1, medium: 2, low: 3, info: 4}; const salient = findings.filter(f => ["fail", "warning", "error"].includes(f.status)).sort((a,b) => (priority[a.severity] ?? 9) - (priority[b.severity] ?? 9)).slice(0,5);
@@ -182,18 +183,23 @@ async function renderOverview() {
     const matrix = new Map(); findings.forEach(f => { const key = f.category || "other"; const row = matrix.get(key) || {pass:0,fail:0,warning:0,unknown:0,error:0}; if (row[f.status] !== undefined) row[f.status]++; matrix.set(key,row); });
     const matrixItems = [...matrix].slice(0,7);
     replaceChildren(qs("#controlMatrix"), [element("div", {className:"matrix-head"}, [element("span", {text:"Family"}), ...["Fail","Warn","?","Err","Pass"].map(label => element("span", {text:label}))]), ...matrixItems.map(([category, counts]) => element("button", {className: "matrix-row", attrs: {type:"button"}}, [element("strong", {text: category}), ...["fail","warning","unknown","error","pass"].map(status => element("span", {className: status, text: counts[status] || "·", attrs: {title: status}}))]))]);
-    replaceChildren(qs("#assessmentHistory"), scopeReports.slice(0,6).reverse().map(item => { const total = Math.max(1, (item.Summary?.Pass || 0)+(item.Summary?.Problems || 0)+(item.Summary?.NotEvaluated || 0)); const height = Math.max(8, Math.round(100*(item.Summary?.Problems || 0)/total)); return element("button", {className:"history-point", attrs:{type:"button",title:`${localTime(item.LastWriteUtc)} · ${item.Summary?.Problems || 0} problems`}}, [element("i", {attrs:{style:`height:${height}%`}}), element("span", {text:new Date(item.LastWriteUtc).toLocaleDateString(undefined,{month:"short",day:"numeric"})})]); }));
+    const history = asset?.history || scopeReports.slice(0,30).reverse().map(item => ({observedAt:item.LastWriteUtc,coverage:item.Summary?.Coverage||0,failed:item.Summary?.Fail||0,warnings:item.Summary?.Warning||0,gaps:item.Summary?.NotEvaluated||0,riskScore:item.Summary?.Problems||0,reportPath:item.RelativePath,retained:true}));
+    const historySummary = asset ? element("div", {className:"asset-history-summary"}, [element("strong", {text:`${asset.kind} · ${asset.value}`}), element("span", {text:`${asset.assessmentCount} assessments · since ${localTime(asset.firstSeen)}`}), element("small", {text:`Latest coverage ${asset.latest.coverage}% · risk ${asset.latest.riskScore} · ${asset.changes.fixed} fixed · ${asset.changes.regressed} regressed`})]) : null;
+    const maxRisk = Math.max(1, ...history.map(item => item.riskScore || 0)); const series = element("div", {className:"history-series"});
+    history.slice(-12).forEach(item => { const point = element(item.retained ? "button" : "div", {className:`history-point${item.retained ? "" : " historical"}`, attrs:item.retained?{type:"button",title:`${localTime(item.observedAt)} · risk ${item.riskScore} · coverage ${item.coverage}%`}:{title:"Historical aggregate; source report is outside current retention."}}, [element("i", {attrs:{style:`height:${Math.max(8,Math.round(100*(item.riskScore||0)/maxRisk))}%`}}), element("span", {text:new Date(item.observedAt).toLocaleDateString(undefined,{month:"short",day:"numeric"})})]); if(item.retained)point.addEventListener("click",()=>openReport(item.reportPath)); series.append(point); });
+    replaceChildren(qs("#assessmentHistory"), [historySummary, series].filter(Boolean));
     replaceChildren(qs("#evidenceQuality"), [element("div", {className:"quality-score"}, [element("strong", {text:`${summary.assessed}/${summary.applicable}`}), element("span", {text:"applicable results assessed"})]), element("p", {text: summary.gaps ? `${summary.gaps} controls lack usable evidence. Resolve collection or access gaps before treating posture as complete.` : "No unknown or error results in this assessment. Scope limitations still apply."}), element("button", {className:"quiet", text:"Inspect evidence gaps", attrs:{type:"button","data-result-preset":"gaps"}})]);
     qsa("#controlMatrix button").forEach((button,index) => button.addEventListener("click", () => openReport(report.RelativePath,{category:matrixItems[index][0]})));
     qs("#evidenceQuality button")?.addEventListener("click", () => openReport(report.RelativePath,{preset:"gaps"}));
 }
 
-function renderScopeFilter() { const select = qs("#scopeFilter"), previous = select.value; const scopes = [...new Set(state.reports.filter(r => ["passive","active"].includes(r.Operation?.Command)).map(targetOf))]; replaceChildren(select,[new Option("All scopes",""),...scopes.map(scope => new Option(scope,scope))]); if (scopes.includes(previous)) select.value=previous; }
+function renderScopeFilter() { const select = qs("#scopeFilter"), previous = select.value; const assets = state.assetHistory.length ? state.assetHistory : [...new Set(state.reports.filter(r => ["passive","active"].includes(r.Operation?.Command)).map(targetOf))].map(value=>({value,kind:"Asset",assessmentCount:0})); replaceChildren(select,[new Option("All assets",""),...assets.map(asset => new Option(`${asset.kind} · ${asset.value}${asset.assessmentCount ? ` (${asset.assessmentCount})` : ""}`,asset.value))]); if (assets.some(asset=>asset.value===previous)) select.value=previous; }
 function renderOperations() {
     const filter = qs("#operationStatusFilter").value; const operations = state.operations.filter(op => !filter || op.Status === filter); qs("#operationCount").textContent = `${operations.length} of ${state.operations.length} operations`;
     if (!operations.length) { replaceChildren(qs("#operationsBody"), [element("tr", {}, [element("td", {className:"empty-cell",text:"No operations match this view.",attrs:{colspan:5}})])]); return; }
     replaceChildren(qs("#operationsBody"), operations.map(operation => { const row=element("tr", {className:operation.Id===state.selectedOperation?"selected":"",attrs:{tabindex:"0"}}, [element("td",{},[element("strong",{text:operation.Title || `${operation.Command} assessment`}),element("small",{text:operation.Id})]),element("td",{text:targetOf(operation)}),element("td",{text:operation.EffectiveControlLevel || operation.ControlLevel}),element("td",{},[pill(operation.Status)]),element("td",{text:localTime(operation.StartedUtc)})]); row.addEventListener("click",()=>selectOperation(operation.Id)); row.addEventListener("keydown",event=>{if(event.key==="Enter")selectOperation(operation.Id);}); return row; }));
     const running=state.operations.filter(op=>op.Status==="Running").length; qs("#runningBadge").hidden=!running; qs("#runningBadge").textContent=running;
+    const selected=state.operations.find(item=>item.Id===state.selectedOperation); if(selected){qs("#logTitle").textContent=`${selected.Title || selected.Command} · ${targetOf(selected)}`;qs("#latestRun").textContent=selected.Id;qs("#latestStatus").textContent=selected.Status;qs("#latestEvidence").textContent=selected.EvidenceStatus||"unknown";qs("#operationMeta").textContent=`Output: ${selected.OutputDirectory||"not recorded"}${selected.ExitCode===null||selected.ExitCode===undefined?"":` · exit code ${selected.ExitCode}`}`;}
 }
 async function selectOperation(id) {
     state.selectedOperation=id; renderOperations(); const operation=state.operations.find(item=>item.Id===id); if(!operation)return;
@@ -210,7 +216,7 @@ function openReport(path, filter={}) { selectTab("results"); state.selectedRepor
 
 async function refresh() {
     if(state.refreshPending)return state.refreshPending;
-    state.refreshPending=(async()=>{try{const snapshot=await api("/api/state");const reports=snapshot.reports||[];while(reports.length<(snapshot.reportTotal||0)){const page=await api(`/api/reports?offset=${reports.length}&limit=500`);if(!page.length)break;reports.push(...page);}Object.assign(state,{services:snapshot.services||[],authCatalog:snapshot.authCatalog||[],controlCatalog:snapshot.controlCatalog||[],baselineCapabilities:snapshot.baselineCapabilities||[],dnsResolver:snapshot.dnsResolver||null,reports,operations:snapshot.operations||[],overview:snapshot.overview||{},reportTotal:snapshot.reportTotal||0});const signature=state.services.map(s=>`${s.Name}:${s.Provider}`).join("|");if(signature!==state.serviceSignature){state.serviceSignature=signature;renderServices();}if(document.activeElement!==qs("#retentionCount"))qs("#retentionCount").value=snapshot.retentionCount||100;renderScopeFilter();renderOperations();renderReports();await renderOverview();qs("#contextFreshness").textContent=`Updated ${new Date().toLocaleTimeString()} · ${assessmentReports().length} assessments`;document.dispatchEvent(new CustomEvent("claudit:state-refreshed",{detail:snapshot}));setConnection(true);}catch(error){setConnection(false,error.message);throw error;}finally{state.refreshPending=null;}})();return state.refreshPending;
+    state.refreshPending=(async()=>{try{const snapshot=await api("/api/state");const reports=snapshot.reports||[];while(reports.length<(snapshot.reportTotal||0)){const page=await api(`/api/reports?offset=${reports.length}&limit=500`);if(!page.length)break;reports.push(...page);}Object.assign(state,{services:snapshot.services||[],authCatalog:snapshot.authCatalog||[],controlCatalog:snapshot.controlCatalog||[],baselineCapabilities:snapshot.baselineCapabilities||[],dnsResolver:snapshot.dnsResolver||null,reports,operations:snapshot.operations||[],overview:snapshot.overview||{},assetHistory:snapshot.assetHistory||[],reportTotal:snapshot.reportTotal||0});const signature=state.services.map(s=>`${s.Name}:${s.Provider}`).join("|");if(signature!==state.serviceSignature){state.serviceSignature=signature;renderServices();}if(document.activeElement!==qs("#retentionCount"))qs("#retentionCount").value=snapshot.retentionCount||100;renderScopeFilter();renderOperations();renderReports();await renderOverview();qs("#contextFreshness").textContent=`Updated ${new Date().toLocaleTimeString()} · ${assessmentReports().length} assessments`;document.dispatchEvent(new CustomEvent("claudit:state-refreshed",{detail:snapshot}));setConnection(true);}catch(error){setConnection(false,error.message);throw error;}finally{state.refreshPending=null;}})();return state.refreshPending;
 }
 
 function bindEvents() {

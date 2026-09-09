@@ -37,10 +37,6 @@ ca_dns_lookup_with_resolver() {
 }
 
 ca_dns_answers() { jq -r '.Answer[]?.data // empty' <<<"$1"; }
-ca_domain_authorized() {
-    local domain="$1"
-    jq -e --arg domain "$domain" '(.Domain.AuthorizedDomains // []) as $domains | ($domains | length == 0) or ($domains | index($domain) != null)' "$(ca_baseline_path)" >/dev/null
-}
 
 ca_check_configured_subdomains() {
     local prefix name type response values checked=0 found=0 unavailable=0 candidate_available candidate_found
@@ -74,7 +70,7 @@ ca_check_dnsx() {
     [[ -s "$wordlist" ]] || { ca_finding CA-DNS-DNSX Domain not_applicable info 'dnsx wordlist empty' 'Domain.Subdomains contains no bounded discovery candidates.'; return; }
     resolvers="$(jq -r '.Domain.DnsxResolvers | join(",")' "$(ca_baseline_path)")"; [[ -z "$resolvers" ]] || resolver_args=(-r "$resolvers")
     if ! output="$(ca_run_cli "$binary" -d "$CLAUDIT_DOMAIN" -w "$wordlist" -rl "$rate" -timeout "$timeout_seconds" -silent -json -omit-raw -disable-update-check "${resolver_args[@]}" 2>/dev/null)"; then ca_finding CA-DNS-DNSX Domain unknown medium 'dnsx discovery unavailable' 'The bounded dnsx process failed or exceeded the global command deadline.'; return; fi
-    if ! jq -s -e --arg domain "$CLAUDIT_DOMAIN" 'length <= 100 and all(.[]; type == "object" and (.host | type == "string") and (.host == $domain or (.host | endswith("." + $domain))) and (.host | split(".") | all(.[]; length >= 1 and length <= 63 and test("^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"))))' >/dev/null 2>&1 <<<"$output"; then ca_finding CA-DNS-DNSX Domain error high 'dnsx response malformed or out of scope' 'dnsx output exceeded the evidence bound or contained a malformed hostname outside the authorized root domain.'; return; fi
+    if ! jq -s -e --arg domain "$CLAUDIT_DOMAIN" 'length <= 100 and all(.[]; type == "object" and (.host | type == "string") and (.host == $domain or (.host | endswith("." + $domain))) and (.host | split(".") | all(.[]; length >= 1 and length <= 63 and test("^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"))))' >/dev/null 2>&1 <<<"$output"; then ca_finding CA-DNS-DNSX Domain error high 'dnsx response malformed or out of scope' 'dnsx output exceeded the evidence bound or contained a malformed hostname outside the declared root domain.'; return; fi
     jq -sc '[.[] | {host, a:(.a // []), aaaa:(.aaaa // []), cname:(.cname // [])}]' <<<"$output" >"$CLAUDIT_OUTPUT_DIRECTORY/claudit-dnsx-discovery.json"
     count="$(jq length "$CLAUDIT_OUTPUT_DIRECTORY/claudit-dnsx-discovery.json")"
     ca_finding CA-DNS-DNSX Domain pass info 'dnsx discovery complete' "dnsx retained $count in-scope result(s) from the bounded configured wordlist."
@@ -82,15 +78,14 @@ ca_check_dnsx() {
 
 ca_check_domain() {
     local domain="${CLAUDIT_DOMAIN,,}" label response records spf dmarc policy selector resolver_label found=0 dkim_collected=0
-    if [[ -z "$domain" ]]; then ca_finding CA-DNS-000 Domain unknown medium 'Business domain scope required' 'Provide one explicitly authorized business domain.'; return; fi
+    if [[ -z "$domain" ]]; then ca_finding CA-DNS-000 Domain unknown medium 'Business domain scope required' 'Provide one business domain.'; return; fi
     [[ "$domain" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$ ]] || { ca_finding CA-DNS-000 Domain error high 'Invalid business domain scope' 'The supplied domain is not a valid hostname.'; return; }
     local -a labels
     IFS='.' read -r -a labels <<<"$domain"
     for label in "${labels[@]}"; do
         [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { ca_finding CA-DNS-000 Domain error high 'Invalid domain label' 'Each DNS label must be 1–63 characters without leading or trailing hyphens.'; return; }
     done
-    if ! ca_domain_authorized "$domain"; then ca_finding CA-DNS-000 Domain error high 'Business domain is outside policy scope' "The declared domain is not present in Domain.AuthorizedDomains."; return; fi
-    ca_finding CA-DNS-000 Domain pass info 'Business domain scope accepted' "Declared domain '$domain' is valid and within the local authorized scope policy."
+    ca_finding CA-DNS-000 Domain pass info 'Business domain scope accepted' "Declared domain '$domain' is syntactically valid and accepted as the assessment asset."
     # `set -e` is active in the runtime: make the successful formal-only exit
     # explicit instead of returning the failed comparison status.
     [[ "$CLAUDIT_LEVEL" != formal ]] || return 0

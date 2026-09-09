@@ -66,6 +66,16 @@ class DashboardReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "request identifier"):
                 cockpit.start_operation({"service": ["Domain"], "mode": "preflight", "controlLevel": "Formal", "requestId": "bad"})
 
+    def test_domain_collection_needs_no_allow_list_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
+            services, _, _, command = cockpit.validate_request({"service": ["Domain"], "mode": "audit",
+                                                                 "controlLevel": "Passive", "domain": "example.com"})
+            self.assertEqual(services, ["Domain"])
+            self.assertEqual(command, "passive")
+            with self.assertRaisesRegex(ValueError, "Explicit authorization"):
+                cockpit.validate_request({"service": ["AWS"], "mode": "audit", "controlLevel": "Passive"})
+
     def test_operation_request_identifier_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, patch.object(dashboard.subprocess, "Popen") as popen:
             process = popen.return_value
@@ -119,6 +129,27 @@ class DashboardReportTests(unittest.TestCase):
             self.assertEqual(report["Summary"]["Assessment"], "Passive")
             self.assertEqual(report["Operation"]["Domain"], "example.com")
             self.assertEqual(cockpit.report_overview([report])["analysisRuns"], 1)
+
+    def test_asset_history_aggregates_unique_domain_and_control_transitions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cockpit = dashboard.Cockpit(ROOT, root, ROOT / "web")
+            for number, status in enumerate(("fail", "pass"), start=1):
+                operation = {"Id": f"run-{number}", "Mode": "audit", "Command": "passive", "Services": ["Domain"], "Domain": "Example.COM"}
+                path = self.report(root, operation, [])
+                document = {"generated_at": f"2026-09-0{number}T10:00:00Z",
+                            "scope": {"level": "passive", "services": "Domain", "domain": "Example.COM."},
+                            "summary": {"coverage": 100},
+                            "findings": [{"id": "CA-DNS-DMARC", "service": "Domain", "status": status,
+                                          "severity": "high", "category": "email", "title": "DMARC"}]}
+                path.write_text(json.dumps(document), encoding="utf-8")
+            assets = cockpit.asset_history(cockpit.report_files())
+            self.assertEqual(len(assets), 1)
+            self.assertEqual(assets[0]["key"], "domain:example.com")
+            self.assertEqual(assets[0]["assessmentCount"], 2)
+            self.assertEqual(assets[0]["changes"]["fixed"], 1)
+            self.assertEqual(assets[0]["controls"][0]["transitions"], 1)
+            self.assertTrue((root / "asset-history.json").is_file())
 
     def test_legacy_safe_operation_is_normalized_to_formal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -52,7 +52,7 @@ SERVICES = [
     {"Name": "Inventory", "Provider": "MultiCloud", "Default": False},
 ]
 AUTH_CATALOG = [
-    {"Provider": "Internet", "Method": "Public", "Description": "Authorized public-domain DNS checks; no credential is accepted."},
+    {"Provider": "Internet", "Method": "Public", "Description": "Public-domain DNS checks; every entered domain is accepted automatically and no credential is used."},
     {"Provider": "Microsoft365", "Method": "DelegatedDeviceCode", "Description": "Uses an existing read-only Microsoft Graph or Azure CLI session."},
     {"Provider": "Microsoft365", "Method": "DelegatedBrowser", "Description": "Uses an existing read-only Microsoft Graph or Azure CLI session."},
     {"Provider": "Microsoft365", "Method": "AppCertificate", "Description": "Uses the configured Exchange app-only environment settings; client secrets are not stored."},
@@ -79,6 +79,7 @@ class Cockpit:
         self.reports_root = self.data_root / "reports"
         self.operations_root = self.reports_root / "dashboard"
         self.state_path = self.data_root / "dashboard-state.json"
+        self.asset_history_path = self.data_root / "asset-history.json"
         self.token = secrets.token_hex(32)
         self.lock = threading.RLock()
         authentication = os.environ.get('CLAUDIT_DASHBOARD_AUTHENTICATION', 'disabled')
@@ -168,6 +169,127 @@ class Cockpit:
     def report_files(self) -> list[Path]:
         files = [path for path in self.reports_root.rglob("claudit-report.json") if path.is_file() and not path.is_symlink()]
         return sorted(files, key=lambda item: item.stat().st_mtime, reverse=True)
+
+    @staticmethod
+    def asset_identity(scope: dict[str, Any]) -> tuple[str, str] | None:
+        fields = (("domain", "Domain"), ("vps", "VPS"), ("aws_profile", "AWS"),
+                  ("azure_subscription", "Azure"), ("gcp_project", "GCP"),
+                  ("m365_tenant", "Microsoft365"), ("tailscale_tailnet", "Tailscale"))
+        for field, kind in fields:
+            value = scope.get(field)
+            if isinstance(value, str) and value.strip() and value.strip() != "-":
+                return kind, value.strip().lower().rstrip(".")
+        return None
+
+    @staticmethod
+    def observation_risk(findings: list[dict[str, Any]]) -> int:
+        severity = {"critical": 10, "high": 7, "medium": 4, "low": 2, "info": 1}
+        status = {"fail": 1.0, "error": 0.8, "warning": 0.5, "unknown": 0.25}
+        return round(sum(severity.get(str(item.get("severity")), 1) * status.get(str(item.get("status")), 0) for item in findings))
+
+    def asset_observation(self, path: Path) -> tuple[str, dict[str, Any]] | None:
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            scope = document.get("scope", {})
+            if not isinstance(scope, dict):
+                return None
+            identity = self.asset_identity(scope)
+            if not identity:
+                return None
+            operation = self.report_operation(path)
+            command = str((operation or {}).get("Command") or scope.get("level") or "").lower()
+            if command not in {"passive", "active"}:
+                return None
+            findings = document.get("findings", [])
+            if not isinstance(findings, list) or any(not isinstance(item, dict) for item in findings):
+                return None
+            summary = self.report_summary(path, {"Command": command})
+            if not summary or summary.get("Kind") != "audit":
+                return None
+            kind, value = identity
+            services = scope.get("services", (operation or {}).get("Services", []))
+            if isinstance(services, str):
+                services = [item.strip() for item in services.split(",") if item.strip()]
+            controls = [{"id": str(item.get("id") or item.get("finding_id") or "unknown"),
+                         "status": str(item.get("status") or "unknown"),
+                         "severity": str(item.get("severity") or "info"),
+                         "title": str(item.get("title") or item.get("id") or "Untitled control"),
+                         "category": str(item.get("category") or "other"),
+                         "service": str(item.get("service") or "unknown")}
+                        for item in findings]
+            relative = path.relative_to(self.reports_root).as_posix()
+            observed = str(document.get("generated_at") or datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat())
+            observation = {"reportPath": relative, "observedAt": observed, "level": command,
+                           "services": services if isinstance(services, list) else [], "summary": summary,
+                           "riskScore": self.observation_risk(findings), "controls": controls}
+            return f"{kind.lower()}:{value}", {"kind": kind, "value": value, "observation": observation}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+
+    @serialized
+    def asset_history(self, report_files: list[Path]) -> list[dict[str, Any]]:
+        try:
+            ledger = json.loads(self.asset_history_path.read_text(encoding="utf-8"))
+            if ledger.get("schema") != "claudit/asset-history-v1" or not isinstance(ledger.get("assets"), dict):
+                raise ValueError
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            ledger = {"schema": "claudit/asset-history-v1", "assets": {}}
+        changed = False
+        for path in report_files:
+            parsed = self.asset_observation(path)
+            if not parsed:
+                continue
+            key, item = parsed
+            asset = ledger["assets"].setdefault(key, {"kind": item["kind"], "value": item["value"], "observations": []})
+            observations = asset.get("observations", [])
+            replacement = item["observation"]
+            existing = next((index for index, entry in enumerate(observations) if entry.get("reportPath") == replacement["reportPath"]), None)
+            if existing is None:
+                observations.append(replacement); changed = True
+            elif observations[existing] != replacement:
+                observations[existing] = replacement; changed = True
+            asset["observations"] = sorted(observations, key=lambda entry: entry.get("observedAt", ""))[-200:]
+        if changed or not self.asset_history_path.exists():
+            ledger["updatedAt"] = utc_now()
+            write_json(self.asset_history_path, ledger)
+        retained = {path.relative_to(self.reports_root).as_posix() for path in report_files}
+        result = []
+        for key, asset in ledger["assets"].items():
+            observations = sorted(asset.get("observations", []), key=lambda entry: entry.get("observedAt", ""))
+            if not observations:
+                continue
+            controls: dict[str, dict[str, Any]] = {}
+            for observation in observations:
+                for control in observation.get("controls", []):
+                    control_id = control["id"]
+                    aggregate = controls.setdefault(control_id, {**control, "observations": 0, "transitions": 0, "firstSeen": observation["observedAt"], "lastSeen": observation["observedAt"]})
+                    if aggregate["observations"] and aggregate["status"] != control["status"]:
+                        aggregate["transitions"] += 1
+                    aggregate.update(control, observations=aggregate["observations"] + 1, lastSeen=observation["observedAt"])
+            latest, previous = observations[-1], observations[-2] if len(observations) > 1 else None
+            history = [{"observedAt": item["observedAt"], "level": item["level"], "coverage": item["summary"].get("Coverage", 0),
+                        "failed": item["summary"].get("Fail", 0), "warnings": item["summary"].get("Warning", 0),
+                        "gaps": item["summary"].get("NotEvaluated", 0), "riskScore": item.get("riskScore", 0),
+                        "reportPath": item["reportPath"], "retained": item["reportPath"] in retained}
+                       for item in observations[-30:]]
+            latest_statuses = {item["id"]: item["status"] for item in latest.get("controls", [])}
+            previous_statuses = {item["id"]: item["status"] for item in (previous or {}).get("controls", [])}
+            changes = {"new": 0, "fixed": 0, "regressed": 0, "changed": 0}
+            for control_id, status in latest_statuses.items():
+                before = previous_statuses.get(control_id)
+                if before is None: changes["new"] += 1
+                elif before == status: continue
+                elif status == "pass" and before in {"fail", "warning", "error"}: changes["fixed"] += 1
+                elif before == "pass" and status in {"fail", "warning", "error"}: changes["regressed"] += 1
+                else: changes["changed"] += 1
+            result.append({"key": key, "kind": asset.get("kind"), "value": asset.get("value"),
+                           "firstSeen": observations[0]["observedAt"], "lastSeen": latest["observedAt"],
+                           "assessmentCount": len(observations), "latest": history[-1],
+                           "delta": {"risk": latest.get("riskScore", 0) - (previous or latest).get("riskScore", 0),
+                                     "coverage": round(latest["summary"].get("Coverage", 0) - (previous or latest)["summary"].get("Coverage", 0), 1)},
+                           "changes": changes, "history": history,
+                           "controls": sorted(controls.values(), key=lambda item: (-item["transitions"], item["id"]))})
+        return sorted(result, key=lambda item: item["lastSeen"], reverse=True)
 
     def report_view(self, path: Path) -> dict[str, Any]:
         relative = path.relative_to(self.reports_root).as_posix()
@@ -348,7 +470,7 @@ class Cockpit:
         if requested_level == "active" and request.get("confirmActiveProbes") is not True:
             raise ValueError("Active controls require explicit probe authorization.")
         command = "doctor" if mode == "preflight" else ("formal" if mode == "safe" else requested_level)
-        if command in {'passive', 'active'} and request.get('confirmTenantConnection') is not True:
+        if command in {'passive', 'active'} and set(services) != {'Domain'} and request.get('confirmTenantConnection') is not True:
             raise ValueError('Explicit authorization for read-only DNS/provider connections is required.')
         if str(request.get('format', 'all')).lower() not in {'all', 'json', 'csv', 'markdown', 'html'}:
             raise ValueError('Unsupported report format.')
@@ -357,7 +479,7 @@ class Cockpit:
             if not isinstance(value, str) or len(value) > 253 or (value and not re.fullmatch(r'[a-zA-Z0-9_][a-zA-Z0-9_.@,-]*', value)):
                 raise ValueError(f'Invalid {field}; use a declared identifier, not a command or URL.')
         if 'Domain' in services and command != 'doctor' and not request.get('domain'):
-            raise ValueError('Declare one authorized root domain.')
+            raise ValueError('Declare one root domain.')
         if 'VPS' in services and command != 'doctor' and not request.get('vpsTarget'):
             raise ValueError('Declare one authorized VPS target.')
         if ',' in request.get('awsRegion', ''):
@@ -485,9 +607,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/state":
             report_files = self.cockpit.report_files()
             reports = [self.cockpit.report_view(path) for path in report_files[:200]]
+            asset_history = self.cockpit.asset_history(report_files)
             return self._json({"services": SERVICES, "authCatalog": AUTH_CATALOG, "controlCatalog": self.cockpit.control_catalog,
                                "baselineCapabilities": self.cockpit.baseline_capabilities, "dnsResolver": self.cockpit.dns_resolver,
-                               "reports": reports, "reportTotal": len(report_files),
+                               "reports": reports, "reportTotal": len(report_files), "assetHistory": asset_history,
                                "overview": self.cockpit.report_overview(reports), "operations": self.cockpit.operation_views(),
                                "operationLimit": 2, "operationTimeoutSeconds": 600, "retentionCount": self.cockpit.retention_count()})
         if parsed.path == '/api/sessions': return self._call(self.cockpit.workspace.index)

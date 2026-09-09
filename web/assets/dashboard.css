@@ -1072,9 +1072,15 @@ button.metric { width:100%; text-align:left; }
 .matrix-row span { display:grid; place-items:center; height:21px; border-radius:5px; color:var(--muted); font-size:10px; }
 .matrix-row .fail,.matrix-row .error { background:var(--danger-soft); color:var(--danger); }.matrix-row .warning,.matrix-row .unknown { background:var(--warning-soft); color:var(--warning); }.matrix-row .pass { background:var(--success-soft); color:var(--success); }
 .operation-meta { margin:8px 0 0; overflow:hidden; color:var(--muted); font:10px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace; text-overflow:ellipsis; white-space:nowrap; }
-.history-chart { display:flex; align-items:end; gap:10px; overflow-x:auto; padding-top:10px; }
+.history-chart { display:grid; grid-template-rows:auto minmax(0,1fr); gap:6px; overflow:hidden; padding-top:8px; }
+.asset-history-summary { min-width:0; display:grid; grid-template-columns:auto 1fr; gap:1px 8px; align-items:baseline; }
+.asset-history-summary strong { overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.asset-history-summary span,.asset-history-summary small { color:var(--muted); font-size:9px; }
+.asset-history-summary small { grid-column:1/-1; }
+.history-series { min-width:0; display:flex; align-items:end; gap:8px; overflow-x:auto; }
 .history-point { min-width:45px; height:130px; display:flex; flex-direction:column; justify-content:flex-end; gap:5px; padding:0; border:0; background:transparent; color:var(--muted); font-size:9px; }
 .history-point i { display:block; min-height:8px; width:100%; border-radius:5px 5px 2px 2px; background:linear-gradient(180deg,var(--danger),var(--warning)); }
+.history-point.historical { opacity:.55; }
 .quality-panel { display:grid; align-content:start; gap:8px; }
 .quality-panel p { margin:0; color:var(--ink-soft); }
 .quality-score { display:flex; align-items:baseline; gap:8px; padding:12px; border-radius:var(--radius-sm); background:var(--surface-soft); }.quality-score strong{font-size:24px}.quality-score span{color:var(--muted)}

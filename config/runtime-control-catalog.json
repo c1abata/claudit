@@ -4,7 +4,7 @@
     {"Id":"CA-BASELINE-001","Service":"Runtime","Level":"Formal","Category":"governance","Remediation":"Correct the local baseline before relying on any audit result."},
     {"Id":"CA-RT-001","Service":"Runtime","Level":"Formal","Category":"runtime","Remediation":"Install jq before running Claudit."},
     {"Id":"CA-RT-002","Service":"Runtime","Level":"Formal","Category":"runtime","Remediation":"Install curl before running Claudit."},
-    {"Id":"CA-DNS-000","Service":"Domain","Level":"Formal","Category":"scope","Remediation":"Declare a syntactically valid, explicitly authorized business domain."},
+    {"Id":"CA-DNS-000","Service":"Domain","Level":"Formal","Category":"scope","Remediation":"Declare a syntactically valid business domain. Every entered domain becomes an assessment asset automatically."},
     {"Id":"CA-DNS-001","Service":"Domain","Level":"Passive","Category":"runtime","Remediation":"Install a DNS resolver client such as dnsutils, or use the configured DNS-over-HTTPS collector."},
     {"Id":"CA-DNS-A","Service":"Domain","Level":"Passive","Category":"dns","Remediation":"Review the expected public A records and remove stale endpoints."},
     {"Id":"CA-DNS-AAAA","Service":"Domain","Level":"Passive","Category":"dns","Remediation":"Review the expected public IPv6 records and remove stale endpoints."},

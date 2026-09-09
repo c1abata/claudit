@@ -29,7 +29,9 @@ class BaselineCapabilityMapTests(unittest.TestCase):
         entries = self.capability_map["Capabilities"]
         mapped = [entry["Path"] for entry in entries]
         self.assertEqual(len(mapped), len(set(mapped)))
-        self.assertEqual(set(mapped), paths)
+        # Deprecated fields remain classified so older private baselines are
+        # accepted during migration even though shipped defaults omit them.
+        self.assertEqual(set(mapped), paths | {"Domain.AuthorizedDomains"})
 
     def test_classifications_are_actionable_and_catalogued(self):
         control_ids = {control["Id"] for control in self.catalog["Controls"]}

@@ -47,7 +47,7 @@ Commands: doctor, formal, passive, active, audit, domain, vps, m365, all,
 
 Common options:
   --service LIST              Comma-separated: Domain,VPS,AWS,Azure,GCP,Tailscale,M365
-  --domain NAME               Authorized DNS domain to audit
+  --domain NAME               DNS domain to audit and track as an asset
   --vps-target HOST           Authorized VPS target
   --output-directory PATH     Report directory (default: ./reports)
   --format FORMAT             json, csv, markdown, html, or all
@@ -104,7 +104,6 @@ Azure:RequireStorageDefaultDeny
 AWS:Regions
 GCP:RequireCentralLogSink
 Tailscale:DisallowReusableAuthKeys
-Domain:AuthorizedDomains
 VPS:AllowedPublicPorts
 Inventory:MaxAssetsPerProvider
 EOF
@@ -342,15 +341,15 @@ ca_doctor() {
 
 ca_wizard() {
     local reply level
-    printf 'Claudit guided audit — read-only, authorized scope only\n'
+    printf 'Claudit guided audit — read-only, declared assets only\n'
     read -r -p 'Services [Domain,VPS,AWS,Azure,GCP,Tailscale,M365,All]: ' CLAUDIT_SERVICE
     [[ -n "$CLAUDIT_SERVICE" ]] || ca_die 'a service selection is required'
-    if [[ ",$CLAUDIT_SERVICE," == *",Domain,"* || "$CLAUDIT_SERVICE" == All ]]; then read -r -p 'Authorized business domain: ' CLAUDIT_DOMAIN; fi
+    if [[ ",$CLAUDIT_SERVICE," == *",Domain,"* || "$CLAUDIT_SERVICE" == All ]]; then read -r -p 'Business domain: ' CLAUDIT_DOMAIN; fi
     if [[ ",$CLAUDIT_SERVICE," == *",VPS,"* || "$CLAUDIT_SERVICE" == All ]]; then read -r -p 'Authorized VPS target: ' CLAUDIT_VPS_TARGET; fi
     read -r -p 'Control level [formal/passive/active] (default passive): ' level
     level="${level:-passive}"; [[ "$level" =~ ^(formal|passive|active)$ ]] || ca_die 'control level must be formal, passive or active'
     CLAUDIT_LEVEL="$level"
-    if [[ "$CLAUDIT_LEVEL" != formal ]]; then read -r -p 'Permit read-only tenant/provider connections? [y/N] ' reply; [[ "$reply" =~ ^[Yy]$ ]] && CLAUDIT_CONFIRM_CONNECTION=1; fi
+    if [[ "$CLAUDIT_LEVEL" != formal && "$CLAUDIT_SERVICE" != Domain ]]; then read -r -p 'Permit read-only tenant/provider connections? [y/N] ' reply; [[ "$reply" =~ ^[Yy]$ ]] && CLAUDIT_CONFIRM_CONNECTION=1; fi
     if [[ "$CLAUDIT_LEVEL" == active ]]; then read -r -p 'Permit bounded active probes of declared targets only? [y/N] ' reply; [[ "$reply" =~ ^[Yy]$ ]] && CLAUDIT_CONFIRM_ACTIVE=1; [[ "$CLAUDIT_CONFIRM_ACTIVE" -eq 1 ]] || ca_die 'active probes were not confirmed'; fi
     printf 'Plan: level=%s services=%s domain=%s vps=%s\n' "$CLAUDIT_LEVEL" "$CLAUDIT_SERVICE" "${CLAUDIT_DOMAIN:-none}" "${CLAUDIT_VPS_TARGET:-none}"
     read -r -p 'Run this plan? [y/N] ' reply; [[ "$reply" =~ ^[Yy]$ ]] || { printf 'No audit was run.\n'; return 0; }

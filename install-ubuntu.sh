@@ -118,10 +118,11 @@ fi
 
 if [[ -n "${legacy_baseline_backup}" ]]; then
   merged_baseline="${upgrade_backup}/merged-baseline.json"
-  # Add newly shipped keys while preserving every existing operator value.
+  # Add newly shipped keys while preserving operator values. The former domain
+  # allow-list is deliberately removed: entered domains are assets by definition.
   # jq object multiplication merges nested objects; legacy arrays and scalars
   # deliberately replace defaults instead of being combined implicitly.
-  jq -s '.[0] * .[1]' "${source_root}/config/baseline.json" "${legacy_baseline_backup}" >"${merged_baseline}"
+  jq -s '.[0] * .[1] | del(.Domain.AuthorizedDomains)' "${source_root}/config/baseline.json" "${legacy_baseline_backup}" >"${merged_baseline}"
   chown root:claudit "${merged_baseline}"
   chmod 0640 "${merged_baseline}"
 fi

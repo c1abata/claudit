@@ -50,7 +50,7 @@
     {"Path":"Tailscale.DisallowReusableAuthKeys","State":"enforced","Controls":["CA-TS-KEYS"],"Explanation":"Collected auth-key device capabilities are checked for reusable keys."},
     {"Path":"Tailscale.DisallowPreauthorizedAuthKeys","State":"enforced","Controls":["CA-TS-KEYS"],"Explanation":"Collected auth-key device capabilities are checked for preauthorized keys."},
     {"Path":"Tailscale.DisallowAllowAllAcl","State":"enforced","Controls":["CA-TS-ACL"],"Explanation":"The JSON tailnet policy is checked for supported universal allow-all ACLs and grants."},
-    {"Path":"Domain.AuthorizedDomains","State":"scope_only","Controls":["CA-DNS-000"],"Explanation":"This is a local authorization boundary, not an internet posture control."},
+    {"Path":"Domain.AuthorizedDomains","State":"scope_only","Controls":[],"Explanation":"Deprecated compatibility field. The Bash runtime ignores its value; every syntactically valid entered domain is accepted as an asset."},
     {"Path":"Domain.Subdomains","State":"enforced","Controls":["CA-DNS-SUBDOMAINS","CA-DNS-DNSX"],"Explanation":"Bounded candidates are checked through the configured DoH resolver and form the optional dnsx wordlist."},
     {"Path":"Domain.RequireDnssec","State":"enforced","Controls":["CA-DNS-DNSSEC"],"Explanation":"The DNS collector requires authenticated DNSSEC evidence when this setting is enabled."},
     {"Path":"Domain.DkimSelectors","State":"enforced","Controls":["CA-DNS-DKIM"],"Explanation":"The DNS collector checks the configured selectors."},

@@ -107,9 +107,6 @@ class Workspace:
         if not isinstance(expectations, dict) or any(key not in ids or value not in ('pass', 'not_applicable', 'info') for key, value in expectations.items()):
             raise ValueError('Expected statuses must map catalog IDs to pass, info or not_applicable.')
         baseline = json.loads((self.cockpit.app_root / 'config/baseline.json').read_text())
-        allowed = baseline['Domain']['AuthorizedDomains']
-        if domain and allowed and domain not in allowed:
-            raise ValueError('The domain is outside the configured authorization policy.')
         baseline['Domain']['ExpectedRecords'] = records
         session = {'schema': 'claudit/session-v1', 'id': secrets.token_hex(12), 'title': title.strip(),
                    'scope': scope, 'baseline': baseline, 'expectedStatuses': expectations,
@@ -134,7 +131,7 @@ class Workspace:
         session = self.load(session_id)
         domain = session['scope'].get('domain', '').lower().rstrip('.')
         if not domain:
-            raise ValueError('The session has no authorized domain scope.')
+            raise ValueError('The session has no domain scope.')
         records = session['baseline']['Domain'].get('ExpectedRecords', [])
         ttl = session['baseline']['Domain']['DefaultTtlSeconds']
         lines = ['; Claudit review export: verify provider syntax before import.', f'$ORIGIN {domain}.', f'$TTL {ttl}']

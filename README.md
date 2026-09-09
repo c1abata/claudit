@@ -63,6 +63,15 @@ provides a split assessment inspector with filters, evidence, remediation,
 retest guidance and exports. Domain, cloud, VPS, specialist and local preflight
 objectives expose only the scope and access fields needed for that operation.
 
+Every syntactically valid domain entered in the CLI or cockpit is accepted and
+registered as an asset; `Domain.AuthorizedDomains` is deprecated and ignored
+when it is present in an older private baseline. The cockpit maintains a compact
+`asset-history.json` ledger outside report retention. Repeated passive or active
+assessments for the same normalized domain or provider asset are consolidated
+into one timeline with coverage, risk score, evidence gaps and control-state
+transitions. Deleting an old report removes its evidence files but keeps the
+historical aggregate and clearly marks that source as outside current retention.
+
 1. Choose services and provider/domain context in **New operation**.
 2. Enter a session title and optional expected DNS records/control results.
 3. Save the session, run Formal, then explicitly authorize Passive collection.
@@ -122,7 +131,9 @@ sudo apt install jq curl python3 dnsutils openssh-client
 
 ## Safe operation model
 
-All operations require authorization for the tenant, account, domain or host.
+Provider and host operations require the appropriate operator access. A domain
+entered by the operator is accepted automatically as an assessment asset and
+does not require an allow-list or a second passive-collection confirmation.
 No commands mutate remote state.
 
 - `formal` validates local prerequisites and declared scope.

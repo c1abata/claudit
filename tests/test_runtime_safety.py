@@ -51,6 +51,14 @@ class RuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(results['CA-DNS-NS'], 'unknown')
         self.assertEqual(results['CA-DNS-SPF'], 'unknown')
 
+    def test_legacy_authorized_domains_field_is_ignored(self):
+        baseline = json.loads((ROOT / 'config/baseline.json').read_text())
+        baseline['Domain']['AuthorizedDomains'] = ['different.example']
+        doc = self.run_audit('formal', '--service', 'Domain', '--domain', 'example.com', baseline=baseline)
+        finding = next(item for item in doc['findings'] if item['id'] == 'CA-DNS-000')
+        self.assertEqual(finding['status'], 'pass')
+        self.assertIn('accepted as the assessment asset', finding['detail'])
+
     def test_cname_alone_does_not_pass_an_a_check(self):
         self.fixture['example.com|A']['Answer'] = [{'type': 5, 'data': 'elsewhere.example.net.'}]
         doc = self.run_audit('passive', '--service', 'Domain', '--domain', 'example.com', fixture=self.fixture)
