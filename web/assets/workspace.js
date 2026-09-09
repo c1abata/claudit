@@ -29,10 +29,11 @@
     paragraph(planPanel, `Executable controls: ${plan.controls.map(item => item.id).join(", ") || "none for this scope"}.`);
     for (const question of plan.suggestedQuestions) paragraph(planPanel, `Ask: ${question}`);
     for (const limitation of plan.limitations) paragraph(planPanel, `Boundary: ${limitation}`);
+    return session;
   }
   async function index() {
     const sessions = await request("/api/sessions");
-    el("sessionSelect").replaceChildren(new Option("Select a work session", ""));
+    el("sessionSelect").replaceChildren(new Option("All assessments", ""));
     for (const session of sessions) el("sessionSelect").add(new Option(`${session.title}${session.archived ? " (archived)" : session.status === "error" ? " (unreadable)" : ""}`, session.id));
     el("sessionSelect").value = selected;
     await load();
@@ -101,14 +102,22 @@
   });
   el("sessionSelect").addEventListener("change", async () => {
     selected = el("sessionSelect").value; el("sessionAnswer").replaceChildren();
-    try {await load();} catch (error) {el("sessionStatus").textContent = error.message;}
+    try {
+      const session = await load();
+      document.dispatchEvent(new CustomEvent("claudit:session-selected", {detail: session}));
+    } catch (error) {el("sessionStatus").textContent = error.message;}
   });
   bind("sessionRun", async () => {
     if (!selected) throw new Error("Save or select a work session first.");
-    const operation = await request("/api/session/run", {id: selected, controlLevel: el("sessionLevel").value,
-      confirmTenantConnection: el("sessionConnection").checked, confirmActiveProbes: el("sessionActive").checked});
-    el("sessionAnswer").replaceChildren(); paragraph(el("sessionAnswer"), `${operation.EffectiveControlLevel} assessment started. Follow progress in Operations; ask about the evidence when it completes.`);
-    await load(); await refresh();
+    const session = await load();
+    const scope = session.scope || {};
+    document.querySelector("input[name='profile'][value='advanced']").checked = true;
+    document.querySelectorAll(".service-checkbox").forEach(input => {input.disabled = false; input.checked = (scope.service || []).includes(input.value);});
+    for (const [key, value] of Object.entries(scope)) {const input = el(key); if (input && typeof value === "string") input.value = value;}
+    el("controlLevel").value = el("sessionLevel").value[0].toUpperCase() + el("sessionLevel").value.slice(1);
+    el("confirmTenantConnection").checked = el("sessionConnection").checked;
+    el("confirmActiveProbes").checked = el("sessionActive").checked;
+    el("sessionDialog").close(); window.claudit.openWizard();
   });
   async function query(kind) {
     if (!selected) throw new Error("Save or select a work session first.");
@@ -135,5 +144,7 @@
     await load();
   }
   bind("sessionAsk", () => query("query")); bind("sessionNote", () => query("note"));
+  el("sessionManage").addEventListener("click", () => el("sessionDialog").showModal());
+  el("closeSession").addEventListener("click", () => el("sessionDialog").close());
   index().catch(error => {el("sessionStatus").textContent = error.message;});
 })();

@@ -38,6 +38,46 @@ class DashboardReportTests(unittest.TestCase):
             self.assertNotIn("unsupported", {item["State"] for item in cockpit.baseline_capabilities})
             self.assertEqual({item["State"] for item in cockpit.baseline_capabilities}, {"enforced", "scope_only"})
             self.assertEqual(cockpit.dns_resolver["fallback"], "disabled")
+            self.assertGreater(len(cockpit.control_catalog), 80)
+
+    def test_assessment_summary_separates_coverage_from_info_and_not_applicable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "claudit-report.json"
+            findings = [
+                {"status": "pass", "severity": "high"},
+                {"status": "fail", "severity": "critical"},
+                {"status": "warning", "severity": "medium"},
+                {"status": "unknown", "severity": "high"},
+                {"status": "error", "severity": "high"},
+                {"status": "info", "severity": "info"},
+                {"status": "not_applicable", "severity": "info"},
+            ]
+            path.write_text(json.dumps({"summary": {"coverage": 71.4}, "findings": findings}))
+            summary = dashboard.Cockpit.report_summary(path, {"Command": "passive"})
+            self.assertEqual(summary["Assessed"], 3)
+            self.assertEqual(summary["Applicable"], 5)
+            self.assertEqual(summary["Coverage"], 60.0)
+            self.assertEqual(summary["LegacyCoverage"], 71.4)
+            self.assertEqual(summary["ConfirmedHighCritical"], 1)
+
+    def test_operation_request_identifier_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
+            with self.assertRaisesRegex(ValueError, "request identifier"):
+                cockpit.start_operation({"service": ["Domain"], "mode": "preflight", "controlLevel": "Formal", "requestId": "bad"})
+
+    def test_operation_request_identifier_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch.object(dashboard.subprocess, "Popen") as popen:
+            process = popen.return_value
+            process.pid = 1234
+            process.poll.return_value = None
+            cockpit = dashboard.Cockpit(ROOT, Path(temporary), ROOT / "web")
+            request = {"service": ["Domain"], "mode": "preflight", "controlLevel": "Formal",
+                       "requestId": "web-12345678-1234-1234-1234-123456789abc"}
+            first = cockpit.start_operation(request)
+            second = cockpit.start_operation(request)
+            self.assertEqual(first["Id"], second["Id"])
+            popen.assert_called_once()
 
     def test_dashboard_rejects_resolver_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

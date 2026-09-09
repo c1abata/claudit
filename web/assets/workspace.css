@@ -1,14 +1,14 @@
 .session-panel {margin-bottom:24px; min-width:0;}
-.session-panel textarea {width:100%;box-sizing:border-box;padding:12px;border:1px solid #48616f;border-radius:8px;background:#101d26;color:#e5edf4;font:inherit;resize:vertical;}
+.session-panel textarea {width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;resize:vertical;}
 .session-panel details {margin:12px 0;}
 .session-panel summary {cursor:pointer;padding:8px 0;}
 .session-panel p,.session-panel article {overflow-wrap:anywhere;}
 .session-panel article {padding:12px;margin-top:12px;border-left:3px solid #5ab6ae;background:rgba(80,140,150,.08);}
 #sessionAnswer a {display:inline-block;margin:8px 16px 8px 0;}
-#sessionStatus {color:#8adad0;}
+#sessionStatus {color:var(--accent-strong);}
 .session-panel input[type=checkbox] {width:auto;}
 /* Session actions appear between fields, unlike the cockpit's sticky footer. */
 .session-panel .action-bar {position:static;margin:14px 0;padding:0;border:0;background:none;backdrop-filter:none;flex-wrap:wrap;}
 .field input[type=checkbox] {width:auto;min-height:0;padding:0;}
 .session-panel .field:has(input[type=checkbox]) > span {display:flex;align-items:center;gap:8px;}
-#sessionStatus {color:#17675d;}
+#sessionStatus {color:var(--accent-strong);}

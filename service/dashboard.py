@@ -88,9 +88,21 @@ class Cockpit:
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.baseline_capabilities = self.load_baseline_capabilities()
         self.dns_resolver = self.load_dns_resolver()
+        self.control_catalog = self.load_control_catalog()
         self.reports_root.mkdir(parents=True, exist_ok=True)
         self.operations_root.mkdir(parents=True, exist_ok=True)
         self.workspace = Workspace(self)
+
+    def load_control_catalog(self) -> list[dict[str, Any]]:
+        path = self.app_root / "config" / "runtime-control-catalog.json"
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            controls = document["Controls"]
+            if not isinstance(controls, list) or any(not isinstance(item, dict) for item in controls):
+                raise ValueError
+            return controls
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Runtime control catalog is unavailable or invalid.") from exc
 
     def load_baseline_capabilities(self) -> list[dict[str, Any]]:
         path = self.app_root / "config" / "baseline-capabilities.json"
@@ -150,9 +162,12 @@ class Cockpit:
     def report_index(self, offset: int = 0, limit: int = 200) -> list[dict[str, Any]]:
         if not 0 <= offset <= 100000 or not 1 <= limit <= 500:
             raise ValueError('Report page must use offset 0–100000 and limit 1–500.')
-        files = [path for path in self.reports_root.rglob("claudit-report.json") if path.is_file() and not path.is_symlink()]
-        page = sorted(files, key=lambda item: item.stat().st_mtime, reverse=True)[offset:offset + limit]
+        page = self.report_files()[offset:offset + limit]
         return [self.report_view(path) for path in page]
+
+    def report_files(self) -> list[Path]:
+        files = [path for path in self.reports_root.rglob("claudit-report.json") if path.is_file() and not path.is_symlink()]
+        return sorted(files, key=lambda item: item.stat().st_mtime, reverse=True)
 
     def report_view(self, path: Path) -> dict[str, Any]:
         relative = path.relative_to(self.reports_root).as_posix()
@@ -197,31 +212,44 @@ class Cockpit:
             count = lambda state: sum(item.get("status") == state for item in findings)
             errors, failed, warnings, unknown = count("error"), count("fail"), count("warning"), count("unknown")
             problems = failed + warnings
+            assessed = sum(item.get("status") in {"pass", "fail", "warning"} for item in findings)
+            applicable = assessed + unknown + errors
             command = str((operation or {}).get("Command", "")).lower()
             assessment = "Preflight" if command == "doctor" else ("Formal validation" if command == "formal" else (command.title() if command else "Unclassified"))
             return {"Kind": "audit", "Assessment": assessment, "Outcome": "ExecutionError" if errors else ("IssuesFound" if problems else ("Incomplete" if unknown or not findings else "Pass")),
                     "Problems": problems, "Pass": count("pass"), "Fail": failed, "Warning": warnings, "Error": errors,
-                    "NotEvaluated": unknown + errors, "High": sum(item.get("severity") in {"high", "critical"} for item in findings),
-                    "Coverage": round(float(summary.get("coverage", 0)), 1)}
+                    "Unknown": unknown, "NotApplicable": count("not_applicable"), "Info": count("info"),
+                    "NotEvaluated": unknown + errors,
+                    "ConfirmedHighCritical": sum(item.get("status") == "fail" and item.get("severity") in {"high", "critical"} for item in findings),
+                    "High": sum(item.get("severity") in {"high", "critical"} for item in findings),
+                    "Assessed": assessed, "Applicable": applicable,
+                    "Coverage": round(100 * assessed / applicable, 1) if applicable else 0.0,
+                    "LegacyCoverage": round(float(summary.get("coverage", 0)), 1)}
         except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
             return {"Kind": "json", "Outcome": "InvalidReport", "Error": "parse error"}
 
     def report_overview(self, reports: list[dict[str, Any]]) -> dict[str, Any]:
         if not reports:
-            return {"runs": 0, "analysisRuns": 0, "latest": None, "salient": []}
+            return {"runs": 0, "analysisRuns": 0, "latest": None, "salient": [], "matrix": {}}
         analyses = [report for report in reports if (report.get("Operation") or {}).get("Command") in {"passive", "active"}]
         if not analyses:
-            return {"runs": len(reports), "analysisRuns": 0, "latest": None, "salient": []}
+            return {"runs": len(reports), "analysisRuns": 0, "latest": None, "salient": [], "matrix": {}}
         latest = analyses[0]
         try:
             document = json.loads(self.report_path(str(latest["RelativePath"])).read_text(encoding="utf-8"))
             priority = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
             findings = [item for item in document.get("findings", []) if item.get("status") in {"error", "fail", "warning"}]
             findings.sort(key=lambda item: (priority.get(item.get("severity"), 9), item.get("title", "")))
-            salient = [{"id": item.get("id"), "service": item.get("service"), "status": item.get("status"), "severity": item.get("severity"), "title": item.get("title"), "remediation": item.get("remediation")} for item in findings[:4]]
+            salient = [{"id": item.get("id"), "service": item.get("service"), "status": item.get("status"), "severity": item.get("severity"), "category": item.get("category"), "title": item.get("title"), "remediation": item.get("remediation")} for item in findings[:5]]
+            matrix: dict[str, dict[str, int]] = {}
+            for item in document.get("findings", []):
+                category = str(item.get("category") or "other")
+                status = str(item.get("status") or "unknown")
+                matrix.setdefault(category, {})[status] = matrix.setdefault(category, {}).get(status, 0) + 1
         except (OSError, ValueError, json.JSONDecodeError):
             salient = []
-        return {"runs": len(reports), "analysisRuns": len(analyses), "latest": latest, "salient": salient}
+            matrix = {}
+        return {"runs": len(reports), "analysisRuns": len(analyses), "latest": latest, "salient": salient, "matrix": matrix}
 
     @serialized
     def operation_views(self) -> list[dict[str, Any]]:
@@ -257,6 +285,11 @@ class Cockpit:
             changed = True
         if operation.get("Status") == "Succeeded" and not (metadata_path.parent / "output" / "claudit-report.json").is_file():
             operation["Status"] = "EvidenceMissing"
+            changed = True
+        evidence = metadata_path.parent / "output" / "claudit-report.json"
+        evidence_status = "available" if evidence.is_file() else ("pending" if operation.get("Status") == "Running" else "unavailable")
+        if operation.get("EvidenceStatus") != evidence_status:
+            operation["EvidenceStatus"] = evidence_status
             changed = True
         if changed:
             metadata_path.write_text(json.dumps(operation, indent=2), encoding="utf-8")
@@ -334,6 +367,13 @@ class Cockpit:
     @serialized
     def start_operation(self, request: dict[str, Any], baseline: dict | None = None, session_id: str | None = None) -> dict[str, Any]:
         services, mode, requested_level, command = self.validate_request(request)
+        client_request_id = str(request.get("requestId", ""))
+        if client_request_id and not re.fullmatch(r"[a-zA-Z0-9-]{12,80}", client_request_id):
+            raise ValueError("Invalid operation request identifier.")
+        if client_request_id:
+            for operation in self.operation_views():
+                if operation.get("ClientRequestId") == client_request_id:
+                    return operation
         if sum(process.poll() is None for process in self.processes.values()) >= 2:
             raise ValueError('Two operations are already running; wait for completion.')
         operation_id = f"dashboard-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{secrets.token_hex(4)}"
@@ -364,9 +404,10 @@ class Cockpit:
             environment.pop('CLAUDIT_DASHBOARD_PASSWORD', None)
             environment.pop('CLAUDIT_WEBHOOK_URL', None)
             process = subprocess.Popen(arguments, env=environment, cwd=self.app_root, stdout=out, stderr=err, start_new_session=True)
-        operation = {"Id": operation_id, "SessionId": session_id, "Scope": {key: request.get(key) for key in ("domain", "vpsTarget", "awsProfile", "awsRegion", "azureSubscription", "gcpProject")}, "Mode": mode, "ControlLevel": requested_level.title(), "Command": command,
+        target = "Local engine" if mode == "preflight" else str(request.get("domain") or request.get("vpsTarget") or request.get("awsProfile") or request.get("azureSubscription") or request.get("gcpProject") or "Provider scope")
+        operation = {"Id": operation_id, "ClientRequestId": client_request_id or None, "SessionId": session_id, "Title": str(request.get("title") or f"{command.title()} · {target}")[:120], "Target": target, "Scope": {key: request.get(key) for key in ("domain", "vpsTarget", "awsProfile", "awsRegion", "azureSubscription", "gcpProject")}, "Mode": mode, "ControlLevel": requested_level.title(), "Command": command,
                      "EffectiveControlLevel": command.title(), "Domain": str(request.get("domain", "")).strip(), "Status": "Running", "ExitCode": None,
-                     "ProcessId": process.pid, "StartedUtc": utc_now(), "Services": services, "OutputDirectory": str(output),
+                     "EvidenceStatus": "pending", "ProcessId": process.pid, "StartedUtc": utc_now(), "Services": services, "OutputDirectory": str(output),
                      "StdoutPath": str(stdout), "StderrPath": str(stderr)}
         (run_root / "metadata.json").write_text(json.dumps(operation, indent=2), encoding="utf-8")
         self.processes[operation_id] = process
@@ -442,8 +483,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/": return self._bytes(self.cockpit.dashboard_html(), "text/html; charset=utf-8")
         if parsed.path.startswith("/assets/"): return self._asset(parsed.path)
         if parsed.path == "/api/state":
-            reports = self.cockpit.report_index()
-            return self._json({"services": SERVICES, "authCatalog": AUTH_CATALOG, "baselineCapabilities": self.cockpit.baseline_capabilities, "dnsResolver": self.cockpit.dns_resolver, "reports": reports, "overview": self.cockpit.report_overview(reports), "operations": self.cockpit.operation_views(), "retentionCount": self.cockpit.retention_count()})
+            report_files = self.cockpit.report_files()
+            reports = [self.cockpit.report_view(path) for path in report_files[:200]]
+            return self._json({"services": SERVICES, "authCatalog": AUTH_CATALOG, "controlCatalog": self.cockpit.control_catalog,
+                               "baselineCapabilities": self.cockpit.baseline_capabilities, "dnsResolver": self.cockpit.dns_resolver,
+                               "reports": reports, "reportTotal": len(report_files),
+                               "overview": self.cockpit.report_overview(reports), "operations": self.cockpit.operation_views(),
+                               "operationLimit": 2, "operationTimeoutSeconds": 600, "retentionCount": self.cockpit.retention_count()})
         if parsed.path == '/api/sessions': return self._call(self.cockpit.workspace.index)
         if parsed.path == '/api/session': return self._call(lambda: self.cockpit.workspace.load(parse_qs(parsed.query).get('id', [''])[0]))
         if parsed.path == '/api/session/export': return self._call(lambda: self.cockpit.workspace.export(parse_qs(parsed.query).get('id', [''])[0]))

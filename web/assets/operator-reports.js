@@ -1,128 +1,81 @@
 "use strict";
 
 (() => {
-    const parameter = new URLSearchParams(window.location.search).get("report");
-    const reportsTab = document.querySelector("#tab-reports");
-    const reportsBody = document.querySelector("#reportsBody");
-    if (!reportsTab || !reportsBody) return;
+    const app = window.claudit;
+    const inspector = document.querySelector("#operatorReport");
+    let current = null;
+    let currentPath = "";
+    let localFilter = {};
 
-    const inspector = document.createElement("section");
-    inspector.id = "operatorReport";
-    inspector.className = "operator-report";
-    inspector.hidden = true;
-    document.querySelector("#reports .panel-body").append(inspector);
-    const overviewContent = document.querySelector("#resultsOverviewContent");
-    const latestButton = document.querySelector("#openLatestReport");
+    const node = (tag, text = "", className = "") => { const element = document.createElement(tag); element.textContent = String(text ?? "—"); if (className) element.className = className; return element; };
+    const badge = (value, kind = "status") => node("span", value, `operator-${kind} ${String(value || "unknown").toLowerCase()}`);
+    const count = (findings, status) => findings.filter(item => item.status === status).length;
 
-    const text = (tag, value, className = "") => {
-        const node = document.createElement(tag);
-        node.textContent = String(value ?? "—");
-        if (className) node.className = className;
-        return node;
-    };
-    const status = (finding) => text("span", finding.status, `operator-status ${finding.status || "unknown"}`);
-    const count = (summary, key) => Number(summary[key] || 0);
+    function matches(finding) {
+        const term = (localFilter.term ?? document.querySelector("#reportFilter").value).trim().toLowerCase();
+        let status = document.querySelector("#reportStatusFilter").value;
+        const severity = document.querySelector("#reportSeverityFilter").value;
+        if (localFilter.preset === "confirmed") status = "fail";
+        if (localFilter.preset === "warning") status = "warning";
+        const gap = localFilter.preset === "gaps";
+        return (!term || `${finding.id} ${finding.service} ${finding.category} ${finding.title} ${finding.detail} ${finding.remediation}`.toLowerCase().includes(term)) &&
+            (!status || finding.status === status) && (!severity || finding.severity === severity) && (!gap || ["unknown", "error"].includes(finding.status)) &&
+            (localFilter.preset !== "confirmed" || ["high", "critical"].includes(finding.severity)) &&
+            (!localFilter.category || finding.category === localFilter.category);
+    }
 
-    function render(documentData, path) {
-        const summary = documentData.summary || {};
-        const findings = Array.isArray(documentData.findings) ? documentData.findings : [];
-        const title = text("h2", "Operator report");
-        const subtitle = text("p", `Generated ${documentData.generated_at || "unknown"} · ${path}`, "operator-subtitle");
-        const close = text("button", "Close", "quiet");
-        close.type = "button";
-        close.addEventListener("click", () => { inspector.hidden = true; history.replaceState(null, "", "/#reports"); });
-        const heading = document.createElement("div"); heading.className = "operator-heading"; heading.append(title, close);
-        const metrics = document.createElement("div"); metrics.className = "operator-metrics";
-        [["Coverage", `${Number(summary.coverage || 0).toFixed(1)}%`], ["Findings", count(summary, "total")], ["Failed", count(summary, "failed")], ["Warnings", count(summary, "warnings")], ["Not assessed", count(summary, "not_assessed")]].forEach(([label, value]) => {
-            const metric = document.createElement("div"); metric.className = "operator-metric"; metric.append(text("strong", value), text("span", label)); metrics.append(metric);
-        });
-        const toolbar = document.createElement("div"); toolbar.className = "operator-toolbar";
-        const filter = document.createElement("input"); filter.type = "search"; filter.placeholder = "Filter control, service, title, remediation"; filter.setAttribute("aria-label", "Filter findings");
-        const stateFilter = document.createElement("select"); stateFilter.setAttribute("aria-label", "Filter finding status");
-        ["All statuses", "fail", "warning", "unknown", "error", "pass", "info"].forEach((value) => { const option = new Option(value, value === "All statuses" ? "" : value); stateFilter.add(option); });
-        toolbar.append(filter, stateFilter);
-        const table = document.createElement("table"); table.className = "operator-findings";
-        table.innerHTML = "<thead><tr><th>Status</th><th>Control</th><th>Service</th><th>Finding and remediation</th></tr></thead>";
-        const body = document.createElement("tbody"); table.append(body);
-        const draw = () => {
-            const term = filter.value.trim().toLowerCase(); const selected = stateFilter.value;
-            body.replaceChildren();
-            const visible = findings.filter((finding) => !selected || finding.status === selected).filter((finding) => `${finding.id} ${finding.service} ${finding.title} ${finding.detail} ${finding.remediation}`.toLowerCase().includes(term));
-            if (!visible.length) { const row = document.createElement("tr"); const cell = text("td", "No findings match the selected filters.", "empty-cell"); cell.colSpan = 4; row.append(cell); body.append(row); return; }
-            visible.forEach((finding) => {
-                const row = document.createElement("tr");
-                const findingCell = document.createElement("td"); findingCell.append(text("strong", finding.title || "Untitled finding"), text("p", finding.detail || "No evidence detail provided.", "operator-detail"), text("p", `Remediation: ${finding.remediation || "No remediation provided."}`, "operator-remediation"));
-                row.append(text("td", "", "").appendChild(status(finding)).parentElement, text("td", finding.id), text("td", finding.service), findingCell); body.append(row);
-            });
+    function renderDetail(finding, container) {
+        const header = document.createElement("div"); header.className = "finding-detail-head";
+        header.append(badge(finding.status), badge(finding.severity, "severity"), node("h4", finding.title || "Untitled control result"));
+        const tabs = document.createElement("div"); tabs.className = "detail-tabs";
+        const content = document.createElement("div"); content.className = "finding-detail-content";
+        const sections = {
+            Summary: [node("p", finding.detail || "No observation detail was emitted."), node("p", `Scope: ${finding.service || "unknown"} · ${finding.category || "uncategorized"}`, "muted")],
+            Evidence: [node("dl", "", "evidence-list")],
+            Control: [node("p", `${finding.id} · catalog level ${finding.catalog_level || finding.control_level || "unknown"}`), node("p", `Finding identity: ${finding.finding_id || "not recorded"}`, "mono"), node("p", `Resource identity: ${finding.resource_uid || "scope-level result"}`, "mono")],
+            "Remediation & retest": [node("p", finding.remediation || "No remediation was provided."), node("p", finding.status === "pass" ? "Keep the baseline and repeat the same scope to verify continued operation." : ["unknown", "error"].includes(finding.status) ? "Restore usable collection evidence, then repeat the same scope." : "Apply an approved change outside Claudit, then repeat the same control and scope.", "next-step")],
         };
-        filter.addEventListener("input", draw); stateFilter.addEventListener("change", draw); draw();
-        inspector.replaceChildren(heading, subtitle, metrics, toolbar, document.createElement("div")); inspector.lastElementChild.append(table); inspector.hidden = false;
+        const evidence = sections.Evidence[0];
+        [["Observed", finding.observed_at], ["Evidence hash", finding.evidence_sha256], ["Control level", finding.control_level], ["Source report", currentPath]].forEach(([key,value]) => { evidence.append(node("dt",key), node("dd",value || "Not recorded")); });
+        const show = name => { content.replaceChildren(...sections[name]); tabs.querySelectorAll("button").forEach(button => button.setAttribute("aria-selected", String(button.textContent === name))); };
+        Object.keys(sections).forEach((name,index) => { const button=node("button",name); button.type="button"; button.setAttribute("aria-selected",String(index===0)); button.addEventListener("click",()=>show(name)); tabs.append(button); });
+        show("Summary"); container.replaceChildren(header,tabs,content);
     }
 
-    async function load(path) {
-        reportsTab.click();
-        inspector.hidden = false; inspector.textContent = "Loading operator report…";
-        try {
-            const response = await fetch(`/api/report?path=${encodeURIComponent(path)}`, {cache: "no-store"});
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            render(await response.json(), path);
-        } catch (error) { inspector.textContent = `Cannot load report: ${error.message}`; }
+    function render() {
+        if (!current) return;
+        const findings = Array.isArray(current.findings) ? current.findings : [];
+        const statusRank = {fail:0,error:1,warning:2,unknown:3,pass:4,info:5,not_applicable:6};
+        const severityRank = {critical:0,high:1,medium:2,low:3,info:4};
+        const visible = findings.filter(matches).sort((left,right)=>(statusRank[left.status]??9)-(statusRank[right.status]??9)||(severityRank[left.severity]??9)-(severityRank[right.severity]??9)||String(left.id).localeCompare(String(right.id)));
+        const summary = document.createElement("div"); summary.className = "operator-summary";
+        const title = document.createElement("div"); title.append(node("p", "Selected assessment", "eyebrow"), node("h3", `${current.scope?.level || "Assessment"} · ${current.scope?.domain || current.scope?.vps || current.scope?.aws_profile || current.scope?.azure_subscription || current.scope?.gcp_project || "Provider scope"}`), node("p", `Observed ${window.claudit ? new Date(current.generated_at).toLocaleString() : current.generated_at} · ${visible.length} of ${findings.length} controls shown`, "muted"));
+        const exports = document.createElement("div"); exports.className = "report-exports";
+        const report = app.state.reports.find(item => item.RelativePath === currentPath);
+        for (const [label,path] of Object.entries(report?.Artifacts || {JSON:currentPath})) { const link=node("a",label); link.href=`/api/report?path=${encodeURIComponent(path)}`; link.target="_blank"; link.rel="noopener"; exports.append(link); }
+        const remove=node("button","Delete report","danger-link"); remove.type="button"; remove.addEventListener("click",async()=>{if(!confirm("Delete this complete report run from local storage?"))return;remove.disabled=true;try{await app.api(`/api/report?path=${encodeURIComponent(currentPath)}`,{method:"DELETE"});current=null;currentPath="";inspector.replaceChildren(node("div","Report deleted. Select another assessment.","empty-state compact"));await app.refresh();}catch(error){remove.disabled=false;app.showToast(error.message,"error");}});exports.append(remove);
+        summary.append(title,exports);
+        const metrics=document.createElement("div"); metrics.className="operator-metrics";
+        const assessed=findings.filter(item=>["pass","fail","warning"].includes(item.status)).length; const applicable=assessed+count(findings,"unknown")+count(findings,"error");
+        [["Coverage",applicable?`${(100*assessed/applicable).toFixed(1)}%`:"—"],["Failed",count(findings,"fail")],["Warnings",count(findings,"warning")],["Evidence gaps",count(findings,"unknown")+count(findings,"error")],["Not applicable",count(findings,"not_applicable")]].forEach(([label,value])=>{const metric=document.createElement("div");metric.append(node("strong",value),node("span",label));metrics.append(metric);});
+        const split=document.createElement("div");split.className="findings-split";const list=document.createElement("div");list.className="findings-list";const detail=document.createElement("article");detail.className="finding-detail";
+        if(!visible.length){list.append(node("div","No control results match the selected filters.","empty-state compact"));detail.append(node("p","Reset or change the filters to inspect evidence.","muted"));}
+        else visible.forEach((finding,index)=>{const button=document.createElement("button");button.type="button";button.className="finding-row";button.append(badge(finding.status),badge(finding.severity,"severity"),node("span",finding.title),node("small",`${finding.service} · ${finding.id}${finding._change && finding._change!=="Unchanged" ? ` · ${finding._change}` : ""}`));button.addEventListener("click",()=>{list.querySelectorAll("button").forEach(item=>item.classList.remove("selected"));button.classList.add("selected");renderDetail(finding,detail);});list.append(button);if(index===0){button.classList.add("selected");renderDetail(finding,detail);}});
+        split.append(list,detail);inspector.replaceChildren(summary,metrics,split);
     }
 
-    function overviewMetric(label, value, tone = "") {
-        const metric = document.createElement("div"); metric.className = `results-overview-metric ${tone}`;
-        metric.append(text("strong", value), text("span", label)); return metric;
+    async function load(path, filter = {}) {
+        currentPath=path;localFilter=filter;
+        if(filter.term)document.querySelector("#reportFilter").value=filter.term;
+        if(filter.preset==="confirmed")document.querySelector("#reportStatusFilter").value="fail";
+        else if(filter.preset==="warning")document.querySelector("#reportStatusFilter").value="warning";
+        else if(filter.preset==="gaps")document.querySelector("#reportStatusFilter").value="";
+        inspector.replaceChildren(node("div","Loading assessment evidence…","empty-state compact"));
+        try{current=await app.api(`/api/report?path=${encodeURIComponent(path)}`);const comparison=await app.compareReport(path,current).catch(()=>({changes:new Map()}));for(const finding of current.findings||[]){finding._change=comparison.changes.get(finding.finding_id||`${finding.service}|${finding.id}`);}render();}
+        catch(error){current=null;inspector.replaceChildren(node("div",`Assessment evidence is unavailable: ${error.message}`,"empty-state compact error"));}
     }
 
-    async function renderOverview() {
-        if (!overviewContent) return;
-        try {
-            const response = await fetch("/api/state", {cache: "no-store"});
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const overview = (await response.json()).overview || {};
-            const latest = overview.latest;
-            overviewContent.replaceChildren();
-            if (!latest) { overviewContent.append(text("p", "No passive or active assessment is retained. Choose Read-only assessment, select Domain only, enter one authorized root domain, then use Passive before opening the report.", "muted")); latestButton.hidden = true; return; }
-            const summary = latest.Summary || {};
-            const metrics = document.createElement("div"); metrics.className = "results-overview-metrics";
-            metrics.append(overviewMetric("Assessments", overview.analysisRuns || 0), overviewMetric("Coverage", `${Number(summary.Coverage || 0).toFixed(1)}%`), overviewMetric("Failures", summary.Fail || 0, "danger"), overviewMetric("Warnings", summary.Warning || 0, "warning"), overviewMetric("Not assessed", summary.NotEvaluated || 0, "warning"));
-            const operation = latest.Operation || {};
-            const meta = text("p", `${summary.Assessment || "Assessment"} · ${(operation.Services || []).join(", ") || "unknown scope"}${operation.Domain ? ` · ${operation.Domain}` : ""} · ${localTime(latest.LastWriteUtc)}`, "results-overview-meta");
-            const salient = document.createElement("div"); salient.className = "results-overview-findings";
-            const items = overview.salient || [];
-            salient.append(text("h3", items.length ? "Priority findings" : "Assessment result"));
-            if (!items.length) salient.append(text("p", "No failed, warning or execution-error findings in the latest report.", "muted"));
-            items.forEach((finding) => { const item = document.createElement("div"); item.className = "results-overview-finding"; item.append(status(finding), text("strong", finding.title), text("span", `${finding.service} · ${finding.id}`), text("p", finding.remediation || "No remediation provided.")); salient.append(item); });
-            overviewContent.append(metrics, meta, salient);
-            latestButton.hidden = false; latestButton.onclick = () => load(latest.RelativePath);
-        } catch (error) { overviewContent.textContent = `Cannot load assessment summary: ${error.message}`; }
-    }
-
-    async function remove(path) {
-        if (!window.confirm("Delete this report and all of its generated artifacts? This cannot be undone.")) return;
-        try {
-            const response = await fetch(`/api/report?path=${encodeURIComponent(path)}`, {method: "DELETE", headers: {"x-claudit-token": document.body.dataset.requestToken}});
-            if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
-            inspector.hidden = true;
-            document.querySelector("#reloadReports").click();
-        } catch (error) { window.alert(`Cannot delete report: ${error.message}`); }
-    }
-
-    function decorate() {
-        reportsBody.querySelectorAll("a[href^='/api/report?path=']").forEach((raw) => {
-            const path = new URL(raw.href).searchParams.get("path");
-            if (!path || !path.endsWith("claudit-report.json") || raw.dataset.operatorLink) return;
-            raw.dataset.operatorLink = "true"; raw.textContent = "Raw";
-            const analyze = document.createElement("a"); analyze.className = "link"; analyze.href = `/?report=${encodeURIComponent(path)}#reports`; analyze.textContent = "Analyze";
-            analyze.addEventListener("click", (event) => { event.preventDefault(); load(path); });
-            const removeButton = text("button", "Delete", "quiet"); removeButton.type = "button"; removeButton.addEventListener("click", () => remove(path));
-            raw.before(analyze, document.createTextNode(" · ")); raw.after(document.createTextNode(" · "), removeButton);
-        });
-    }
-    const observer = new MutationObserver(decorate);
-    observer.observe(reportsBody, {childList: true, subtree: true});
-    decorate();
-    document.addEventListener("claudit:state-refreshed", () => { renderOverview(); });
-    renderOverview();
-    if (parameter) load(parameter);
+    document.addEventListener("claudit:open-report",event=>load(event.detail.path,event.detail.filter));
+    document.addEventListener("claudit:result-filter",()=>{localFilter={};render();});
+    const parameter=new URLSearchParams(location.search).get("report");if(parameter){app.selectTab("results");load(parameter);}
 })();

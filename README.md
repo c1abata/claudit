@@ -56,6 +56,13 @@ Run the same cockpit used by systemd against a local writable data directory:
 ./claudit.sh dashboard --output-directory "$HOME/.local/share/claudit"
 ```
 
+The compact cockpit separates decisions from execution: **Overview** correlates
+risk, control families, coverage and evidence quality; **Operations** is the
+only place that starts work through an adaptive five-step wizard; **Results**
+provides a split assessment inspector with filters, evidence, remediation,
+retest guidance and exports. Domain, cloud, VPS, specialist and local preflight
+objectives expose only the scope and access fields needed for that operation.
+
 1. Choose services and provider/domain context in **New operation**.
 2. Enter a session title and optional expected DNS records/control results.
 3. Save the session, run Formal, then explicitly authorize Passive collection.
